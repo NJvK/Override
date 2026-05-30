@@ -768,6 +768,7 @@ void skills_auto() {
     chassis.waitUntil(13);
     toggle_matchload();
 }
+
 void skills_auto1() {
     chassis.setPose(0, 0, 0);
     resetcoord(3, 0);
@@ -913,6 +914,7 @@ void skills_auto1() {
     chassis.waitUntil(13);
     toggle_matchload();
 }
+
 void inch() {
     chassis.setPose(0, 0, 0);
     chassis.moveToPose(0, 5, 0, 1000);
