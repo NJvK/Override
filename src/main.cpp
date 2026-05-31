@@ -4,6 +4,7 @@
 #include "pros/motors.h"
 #include "pros/rtos.hpp"
 #include <iterator>
+#include <cmath>
 
 // controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
@@ -25,7 +26,55 @@ pros::Rotation verticalEnc(-11);
 lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
 // vertical tracking wheel. 2.75" diameter, 2.5" offset, left of the robot (negative)
 lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
+// --------------------------------------X-drive specific code--------------------------------------
+const double PI = 3.14159265358979323846;
 
+int deadband(int value) {
+    if (abs(value) < 5) {
+        return 0;
+    }
+    return value;
+}
+
+// Replace these with your actual X-drive corner motors
+pros::Motor frontLeft(1, pros::MotorGearset::blue);
+pros::Motor frontRight(2, pros::MotorGearset::blue);
+pros::Motor backLeft(3, pros::MotorGearset::blue);
+pros::Motor backRight(4, pros::MotorGearset::blue);
+
+void fieldCentricXDrive(int forward, int strafe, int turn) {
+    forward = deadband(forward);
+    strafe = deadband(strafe);
+    turn = deadband(turn);
+
+    double heading = imu.get_rotation() * PI / 180.0;
+
+    double robotForward = forward * cos(heading) + strafe * sin(heading);
+    double robotStrafe = -forward * sin(heading) + strafe * cos(heading);
+
+    double fl = robotForward + robotStrafe + turn;
+    double fr = robotForward - robotStrafe - turn;
+    double bl = robotForward - robotStrafe + turn;
+    double br = robotForward + robotStrafe - turn;
+
+    double maxVal = fabs(fl);
+    if (fabs(fr) > maxVal) maxVal = fabs(fr);
+    if (fabs(bl) > maxVal) maxVal = fabs(bl);
+    if (fabs(br) > maxVal) maxVal = fabs(br);
+
+    if (maxVal > 127) {
+        fl = fl / maxVal * 127;
+        fr = fr / maxVal * 127;
+        bl = bl / maxVal * 127;
+        br = br / maxVal * 127;
+    }
+
+    frontLeft.move((int)fl);
+    frontRight.move((int)fr);
+    backLeft.move((int)bl);
+    backRight.move((int)br);
+}
+// --------------------------------------X-drive specific code--------------------------------------
 // drivetrain settings
 lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
                               &rightMotors, // right motor group
@@ -268,7 +317,7 @@ void resetcoord(int quadrant, int angle) {
 void initialize() {
     pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
-
+    imu.tare_rotation();
     // the default rate is 50. however, if you need to change the rate, you
     // can do the following.
     // lemlib::bufferedStdout().setRate(...);
@@ -283,7 +332,7 @@ void initialize() {
             // print robot location to the brain screen
             pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
             pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
-            pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
+            pros::lcd::print(2, "Angle: %f", chassis.getPose().theta); // heading
             // log position telemetry
             lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
             // delay to save resources
@@ -952,9 +1001,12 @@ void opcontrol() {
     while (true) {
         // get joystick positions
         int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
-        int rightX = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+        int leftX = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+        int rightX = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_X);
+
         // move the chassis with curvature drive
-        chassis.arcade(leftY, 0.9 * rightX);
+        // chassis.arcade(leftY, 0.9 * rightX);
+        fieldCentricXDrive(leftY, leftX, rightX);
 
         // buttons for controller
 
