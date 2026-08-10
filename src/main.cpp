@@ -89,11 +89,18 @@ bool claw_state = false;
 void toggle_claw() {
     claw_state = !claw_state;
     claw.set_value(claw_state);
-    pros::delay(200); // Add a small delay to prevent rapid toggling
+    pros::delay(400); // Add a small delay to prevent rapid toggling
 }
+
+double cascade1Start;
+double cascade2Start;
 void initialize() {
-    pros::lcd::initialize(); // initialize brain screen
+    pros::lcd::initialize(); // initializwhoamie brain screen
     chassis.calibrate(); // calibrate sensors
+
+    // these 2 store the inital postion of the cascade lifts, so that it would not go lower that this position
+    cascade1Start = cascade1.get_position();
+    cascade2Start = cascade2.get_position();
 
     // the default rate is 50. however, if you need to change the rate, you
     // can do the following.
@@ -144,6 +151,7 @@ void cascade(float speed, int time) {
     cascade1.move_velocity(0);
     cascade2.move_velocity(0);
 }
+
 void redLeft() {
     chassis.setPose(0, 0, 0);
     pros::delay(50);
@@ -192,8 +200,10 @@ void opcontrol() {
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
             toggle_claw();
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            cascade1.move_velocity(-200);
-            cascade2.move_velocity(-200);
+            if (cascade1.get_position() > cascade1Start || cascade2.get_position() > cascade2Start){
+                cascade1.move_velocity(-100);
+                cascade2.move_velocity(-100);
+            }
         } else {
             cascade1.move_velocity(0);
             cascade2.move_velocity(0);
