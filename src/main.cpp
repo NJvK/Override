@@ -40,10 +40,10 @@ lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
                               2 // horizontal drift is 2. If we had traction wheels, it would have been 8
 );
 // lateral motion controller
-lemlib::ControllerSettings linearController(5, // proportional gain (kP)
+lemlib::ControllerSettings linearController(5.78, // proportional gain (kP)
                                             0, // integral gain (kI)
                                             6, // derivative gain (kD)
-                                            0, // anti windup
+                                            .5, // anti windup
                                             1, // small error range, in inches
                                             75, // small error range timeout, in milliseconds
                                             2, // large error range, in inches
@@ -89,18 +89,11 @@ bool claw_state = false;
 void toggle_claw() {
     claw_state = !claw_state;
     claw.set_value(claw_state);
-    pros::delay(400); // Add a small delay to prevent rapid toggling
+    pros::delay(300); // Add a small delay to prevent rapid toggling
 }
-
-double cascade1Start;
-double cascade2Start;
 void initialize() {
-    pros::lcd::initialize(); // initializwhoamie brain screen
+    pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
-
-    // these 2 store the inital postion of the cascade lifts, so that it would not go lower that this position
-    cascade1Start = cascade1.get_position();
-    cascade2Start = cascade2.get_position();
 
     // the default rate is 50. however, if you need to change the rate, you
     // can do the following.
@@ -151,27 +144,61 @@ void cascade(float speed, int time) {
     cascade1.move_velocity(0);
     cascade2.move_velocity(0);
 }
-
 void redLeft() {
+    // chassis.setPose(0, 0, 0);
+    // pros::delay(50);
+    // cascade(200, 70);
+    // pros::delay(100);
+    // toggle_claw();
+    // pros::delay(50);
+    // cascade(200, 300);
+    // chassis.moveToPoint(0, 2.5, 1000, {.minSpeed = 30});
+    // chassis.turnToHeading(-75, 1000, {.earlyExitRange = 1});
+    // // moves to goal
+    // chassis.moveToPoint(-17, 5.4, 1000, {.minSpeed = 30});
+    // pros::delay(800);
+    // cascade(-200, 130);
+    // toggle_claw();
+    // chassis.turnToHeading(-55, 500);
+    // // // scores preload pin
+    // chassis.moveToPoint(-4.8, 14.7, 1000);
+    // chassis.turnToHeading(-90, 1000);
+    // chassis.moveToPoint(-45, 17, 1000);
+    // chassis.turnToHeading(0, 1000);
+    // chassis.moveToPoint(-45, -2, 1000,  {.forwards = false});
+
     chassis.setPose(0, 0, 0);
     pros::delay(50);
-    cascade(200, 70);
-    pros::delay(100);
+    pros::delay(50);
+    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
+    pros::delay(50);
+    chassis.moveToPoint(0, 5, 1000);
+    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
+
+    // chassis.moveToPoint(0, 10, 1000);
+    // chassis.turnToHeading(55, 700);
+}
+void redRight() {
+    // toggle
+    chassis.setPose(0, 0, 0);
+    pros::delay(50);
     toggle_claw();
     pros::delay(50);
-    cascade(200, 300);
-    chassis.moveToPoint(0, 9, 1000);
-    chassis.turnToHeading(-57, 1000);
-    chassis.moveToPoint(-20, 22, 1000);
-    pros::delay(100);    pros::delay(700);
-    cascade(-200, 130);
-    toggle_claw();
-    chassis.turnToHeading(-55, 500);
-    // scores preload pin
-    // chassis.moveToPose(-4.8, 14.7, -89, 1000);
+    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
+    pros::delay(50);
+    // chassis.moveToPoint(0, 5, 1000);
+    // chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
 }
+void skills(){
+    chassis.setPose(0, 0, 0);
+    pros::delay(50);
+    chassis.moveToPoint(0, 72, 3000, {.maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 5});
+}
+
 void autonomous() {
-    redLeft();
+    // redLeft();
+    // redRight(); // does one time
+    skills();
 }
 /**
  * Runs in driver control
@@ -197,13 +224,14 @@ void opcontrol() {
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
             cascade1.move_velocity(200);
             cascade2.move_velocity(200);
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
+            toggle_claw();
+
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
             toggle_claw();
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            if (cascade1.get_position() > cascade1Start || cascade2.get_position() > cascade2Start){
-                cascade1.move_velocity(-100);
-                cascade2.move_velocity(-100);
-            }
+            cascade1.move_velocity(-200);
+            cascade2.move_velocity(-200);
         } else {
             cascade1.move_velocity(0);
             cascade2.move_velocity(0);
