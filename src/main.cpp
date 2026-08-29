@@ -83,14 +83,18 @@ lemlib::ExpoDriveCurve steerCurve(3, // joystick deadband out of 127
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors, &throttleCurve, &steerCurve);
 pros::Motor cascade1(20);
 pros::Motor cascade2(-13);
-pros::adi::DigitalOut claw('A');
+pros::Motor cascade3(19);
+pros::Motor banshee(11);
+pros::Motor intake(12);
+pros::adi::DigitalOut tBanshee('A');
+bool bansheeOn = false;
 
-bool claw_state = false;
-void toggle_claw() {
-    claw_state = !claw_state;
-    claw.set_value(claw_state);
+void toggleBanshee() {
+    bansheeOn = !bansheeOn;
+    tBanshee.set_value(bansheeOn);
     pros::delay(300); // Add a small delay to prevent rapid toggling
 }
+
 void initialize() {
     pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
@@ -140,66 +144,28 @@ void exit_condition(lemlib::Pose target, double exitDist) {
 void cascade(float speed, int time) {
     cascade1.move_velocity(speed);
     cascade2.move_velocity(speed);
+    cascade3.move_velocity(speed);
     pros::delay(time);
     cascade1.move_velocity(0);
     cascade2.move_velocity(0);
+    cascade3.move_velocity(0);
 }
 void redLeft() {
-    // chassis.setPose(0, 0, 0);
-    // pros::delay(50);
-    // cascade(200, 70);
-    // pros::delay(100);
-    // toggle_claw();
-    // pros::delay(50);
-    // cascade(200, 300);
-    // chassis.moveToPoint(0, 2.5, 1000, {.minSpeed = 30});
-    // chassis.turnToHeading(-75, 1000, {.earlyExitRange = 1});
-    // // moves to goal
-    // chassis.moveToPoint(-17, 5.4, 1000, {.minSpeed = 30});
-    // pros::delay(800);
-    // cascade(-200, 130);
-    // toggle_claw();
-    // chassis.turnToHeading(-55, 500);
-    // // // scores preload pin
-    // chassis.moveToPoint(-4.8, 14.7, 1000);
-    // chassis.turnToHeading(-90, 1000);
-    // chassis.moveToPoint(-45, 17, 1000);
-    // chassis.turnToHeading(0, 1000);
-    // chassis.moveToPoint(-45, -2, 1000,  {.forwards = false});
 
-    chassis.setPose(0, 0, 0);
-    pros::delay(50);
-    pros::delay(50);
-    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
-    pros::delay(50);
-    chassis.moveToPoint(0, 5, 1000);
-    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
-
-    // chassis.moveToPoint(0, 10, 1000);
-    // chassis.turnToHeading(55, 700);
 }
 void redRight() {
-    // toggle
-    chassis.setPose(0, 0, 0);
-    pros::delay(50);
-    toggle_claw();
-    pros::delay(50);
-    chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
-    pros::delay(50);
-    // chassis.moveToPoint(0, 5, 1000);
-    // chassis.moveToPoint(0, -3, 1000, {.forwards = false, .maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 1});
+    
 }
 void skills(){
-    chassis.setPose(0, 0, 0);
-    pros::delay(50);
-    chassis.moveToPoint(0, 72, 3000, {.maxSpeed = 80, .minSpeed = 50, .earlyExitRange = 5});
+
 }
 
 void autonomous() {
     // redLeft();
     // redRight(); // does one time
-    skills();
+    // skills();
 }
+
 /**
  * Runs in driver control
  */
@@ -208,12 +174,6 @@ void opcontrol() {
     // loop to continuously update motors
     chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
     while (true) {
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
-            chassis.setPose(0, 0, 0);
-        
-            chassis.moveToPoint(0, 6, 3000);
-            chassis.waitUntilDone();
-        }
         // get joystick positions
         int leftY = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
         int rightX = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X));
@@ -224,17 +184,31 @@ void opcontrol() {
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
             cascade1.move_velocity(200);
             cascade2.move_velocity(200);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
-            toggle_claw();
-
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-            toggle_claw();
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
             cascade1.move_velocity(-200);
             cascade2.move_velocity(-200);
+        } else if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
+            if (intake.get_actual_velocity() <= 0) {
+                // forwards 
+                intake.move_velocity(200);
+                banshee.move_velocity(200);
+            } else {
+                intake.move_velocity(0);
+            }
+        } else if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R2)) {
+            if (intake.get_actual_velocity() >= 0) {
+                intake.move_velocity(-200);
+                banshee.move_velocity(-200);
+            } else {
+                intake.move_velocity(0);
+            }
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_A)) {
+            toggleBanshee;
         } else {
             cascade1.move_velocity(0);
             cascade2.move_velocity(0);
+            intake.move_velocity(0);
+            banshee.move_velocity(0);
         }
         // delay to save resources
         pros::delay(10);
