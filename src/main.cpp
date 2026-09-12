@@ -19,26 +19,42 @@
 //   DOWN      turn color sorting on / off
 //   automatic orientation piston follows DR4B height
 // ============================================================
+//
+// PORT MAP
+//   left drive    17, 10 (both reversed)
+//   right drive   2, 1
+//   IMU           4
+//   DR4B          20, 13 (13 reversed)
+//   intake        NOT SET  <-- see INTAKE_PORT below
+//   optical       NOT SET  <-- see OPTICAL_PORT below
+//   claw          ADI A
+//   orientation   ADI B
+//
+// Valid V5 smart ports are 1 through 21. Port 0 does not exist, so anything
+// assigned to it is dead. Two devices are still on 0 and need real ports.
+// ============================================================
 
 // controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
 // motor groups
-pros::MotorGroup leftMotors({-7, -12}, pros::MotorGearset::blue);
+pros::MotorGroup leftMotors({-17, -10}, pros::MotorGearset::blue);
 pros::MotorGroup rightMotors({2, 1}, pros::MotorGearset::blue);
 
-// Inertial Sensor on port 18
-pros::Imu imu(18);
+// Inertial Sensor on port 4
+pros::Imu imu(4);
 
 // tracking wheels
-// horizontal tracking wheel encoder. Rotation sensor, port 8, not reversed
-pros::Rotation horizontalEnc(8);
-// vertical tracking wheel encoder. Rotation sensor, port 15, reversed
-pros::Rotation verticalEnc(-15);
-// horizontal tracking wheel. 2.75" diameter, 5.75" offset, back of the robot (negative)
-lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
-// vertical tracking wheel. 2.75" diameter, 2.5" offset, left of the robot (negative)
-lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
+// These were on port 0, which is not a real port, AND the OdomSensors block
+// below passes nullptr for every tracking wheel, so LemLib never reads them.
+// Odometry currently runs off the IMU plus the drive motor encoders.
+// If you add tracking wheels back, uncomment these and put real ports in,
+// then put the pointers back into the OdomSensors block.
+//
+// pros::Rotation horizontalEnc(0);
+// pros::Rotation verticalEnc(-0);
+// lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
+// lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
 
 const double PI = 3.14159265358979323846;
 
@@ -57,18 +73,20 @@ int deadband(int value) {
 // the wheels back under the center of gravity. Control goes back to the
 // driver once the lean drops below TIP_ANGLE_OFF.
 //
-// SETUP STEP 1: pitch vs roll.
-//   Which axis reads "nose up / nose down" depends on how the IMU is
-//   mounted. Lines 3 and 4 of the brain screen show both. Lift the front of
-//   the robot by hand and see which number changes. If it is roll, set
-//   USE_ROLL to true.
+// SETUP STEP 1: which axis.
+//   Set to the y-axis, which is pitch, meaning nose up and nose down.
+//   The x-axis is roll, meaning side to side. Lines 3 and 4 of the brain
+//   screen show both. Lift the front of the robot by hand and confirm the
+//   y/pitch number is the one that moves. If it is the other one, change
+//   TIP_AXIS to TipAxis::X_ROLL.
 //
 // SETUP STEP 2: direction.
 //   Put the robot on blocks so the wheels spin free, tilt it past the
 //   trigger angle, and watch the wheels. They should spin toward the low
 //   side. If they spin the wrong way, set TIP_INVERT to true.
 //
-constexpr bool   USE_ROLL      = false;  // true if roll is the forward/back axis
+enum class TipAxis { Y_PITCH, X_ROLL };
+constexpr TipAxis TIP_AXIS     = TipAxis::Y_PITCH; // y-axis, nose up / nose down
 constexpr double TIP_ANGLE_ON  = 12.0;   // degrees of lean before taking over
 constexpr double TIP_ANGLE_OFF = 4.0;    // degrees of lean before giving control back
 constexpr double TIP_KP        = 6.0;    // motor power per degree past the threshold
@@ -80,7 +98,7 @@ bool antiTipActive = false;
 // Returns the lean angle on whichever axis is configured above.
 // Positive is treated as "nose up" (falling backward).
 double tipAngle() {
-    double angle = USE_ROLL ? imu.get_roll() : imu.get_pitch();
+    double angle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
     // the IMU returns infinity while calibrating or if the port is unplugged
     if (!std::isfinite(angle)) { return 0.0; }
     return TIP_INVERT ? -angle : angle;
@@ -147,10 +165,12 @@ lemlib::ControllerSettings angularController(3.7, // proportional gain (kP)
 );
 
 // sensors for odometry
+// no tracking wheels connected, so odometry runs on the IMU plus the drive
+// motor encoders
 lemlib::OdomSensors sensors(
-    &vertical, // vertical tracking wheel
+    nullptr, // vertical tracking wheel
     nullptr, // no second vertical tracking wheel
-    &horizontal, // horizontal tracking wheel
+    nullptr, // horizontal tracking wheel
     nullptr, // no second horizontal tracking wheel
     &imu // inertial sensor
 );
@@ -173,14 +193,16 @@ lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors
 pros::Motor DR4B1(20);
 pros::Motor DR4B2(-13);
 
-// WARNING: port 12 is already used by leftMotors above. Change this to the
-// port the intake is actually plugged into.
-constexpr int INTAKE_PORT = 12;
+// STILL NEEDS A REAL PORT. 0 is not a valid V5 port, so the intake will not
+// move until this is set to something between 1 and 21. Ports already taken:
+// 1, 2, 4, 10, 13, 17, 20.
+constexpr int INTAKE_PORT = 0;
+constexpr bool INTAKE_OK = (INTAKE_PORT >= 1 && INTAKE_PORT <= 21);
 pros::Motor intake(INTAKE_PORT);
 
-pros::adi::DigitalOut tClaw('A'); // claw orientation piston, driven automatically
+pros::adi::DigitalOut tClaw('B'); // claw orientation piston, driven automatically
 // pros::adi::DigitalOut tClaw2('C');
-pros::adi::DigitalOut claw('B');  // claw open/close, driven by button A
+pros::adi::DigitalOut claw('A');  // claw open/close, driven by button A
 
 // ============================================================
 // COLOR SORT
@@ -192,7 +214,10 @@ pros::adi::DigitalOut claw('B');  // claw open/close, driven by button A
 //
 // Set your alliance below, or press B on the controller to flip it.
 //
-constexpr int OPTICAL_PORT = 11; // change to your actual port
+// STILL NEEDS A REAL PORT, same as the intake above. While it is 0, sorting
+// is skipped entirely and the intake just does what the driver asks.
+constexpr int OPTICAL_PORT = 0;
+constexpr bool OPTICAL_OK = (OPTICAL_PORT >= 1 && OPTICAL_PORT <= 21);
 pros::Optical colorSensor(OPTICAL_PORT);
 
 enum class Alliance { RED, BLUE };
@@ -206,6 +231,7 @@ constexpr double RED_HUE_WRAP   = 340;  // and this up to 360 also counts as red
 constexpr double BLUE_HUE_MIN   = 190;
 constexpr double BLUE_HUE_MAX   = 240;
 constexpr int    MIN_PROXIMITY  = 150;  // 0-255, ignore anything not right up close
+constexpr int    MAX_PROXIMITY  = 255;  // real readings never exceed this
 constexpr int    EJECT_DELAY_MS = 60;   // travel time from sensor to eject point
 constexpr int    EJECT_TIME_MS  = 250;  // how long to run the intake backward
 constexpr int    EJECT_SPEED    = -127; // use 0 instead if you want it to just stop
@@ -220,9 +246,12 @@ bool hueIsBlue(double hue) { return hue >= BLUE_HUE_MIN && hue <= BLUE_HUE_MAX; 
 
 // True if the thing at the sensor belongs to the other alliance.
 bool isOpposingPiece() {
-    if (colorSensor.get_proximity() < MIN_PROXIMITY) { return false; }
+    int prox = colorSensor.get_proximity();
+    // an unplugged sensor returns PROS_ERR, a huge number that would sail
+    // past the minimum check and look like a piece jammed against the lens
+    if (prox < MIN_PROXIMITY || prox > MAX_PROXIMITY) { return false; }
     double hue = colorSensor.get_hue();
-    if (!std::isfinite(hue)) { return false; } // sensor unplugged
+    if (!std::isfinite(hue)) { return false; }
     return (alliance == Alliance::RED) ? hueIsBlue(hue) : hueIsRed(hue);
 }
 
@@ -230,12 +259,14 @@ bool isOpposingPiece() {
 // This task is the only thing that talks to the intake motor. Everything else
 // just sets intakeCommand.
 void colorSortTask() {
-    colorSensor.set_led_pwm(100);         // sensor needs its own light to read color
-    colorSensor.set_integration_time(20); // faster sampling for moving pieces
+    if (OPTICAL_OK) {
+        colorSensor.set_led_pwm(100);         // sensor needs its own light to read color
+        colorSensor.set_integration_time(20); // faster sampling for moving pieces
+    }
 
     while (true) {
         // only sort while the intake is actually pulling something in
-        if (sortingEnabled && intakeCommand > 0 && isOpposingPiece()) {
+        if (OPTICAL_OK && sortingEnabled && intakeCommand > 0 && isOpposingPiece()) {
             ejecting = true;
             pros::delay(EJECT_DELAY_MS); // let the piece reach the eject point
             intake.move(EJECT_SPEED);
@@ -300,6 +331,7 @@ void initialize() {
     // right now for the orientation piston logic to work.
     DR4B1.tare_position();
     DR4B2.tare_position();
+    // hold, so the lift does not sag back down past the piston threshold
     DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
     DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
@@ -308,7 +340,8 @@ void initialize() {
     tClaw.set_value(true);
     claw.set_value(clawOn);
 
-    // start the color sorting task
+    // start the color sorting task. it also drives the intake, so it runs
+    // even when the optical sensor is not connected.
     pros::Task sortTask(colorSortTask);
 
     // the default rate is 50. however, if you need to change the rate, you
@@ -326,20 +359,24 @@ void initialize() {
             pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
             pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
             pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
-            // anti-tip readouts: use these to pick the right axis and check tuning
-            pros::lcd::print(3, "Pitch: %.1f", imu.get_pitch());
-            pros::lcd::print(4, "Roll: %.1f", imu.get_roll());
+            // anti-tip readouts. y/pitch is the axis in use.
+            pros::lcd::print(3, "Y/Pitch: %.1f", imu.get_pitch());
+            pros::lcd::print(4, "X/Roll: %.1f", imu.get_roll());
             // lift position, for setting DR4B_DOWN_POS and DR4B_UP_POS
             pros::lcd::print(5, "Lift: %.0f  Tip: %s  Ort: %s",
                              dr4bPosition(),
                              antiTipActive ? "ACT" : "off",
                              tclawOn ? "on" : "off");
             // color sort readouts: hold a real game piece here to check the hue ranges
-            pros::lcd::print(6, "Hue: %.0f  Prox: %d",
-                             colorSensor.get_hue(), colorSensor.get_proximity());
+            if (OPTICAL_OK) {
+                pros::lcd::print(6, "Hue: %.0f  Prox: %d",
+                                 colorSensor.get_hue(), colorSensor.get_proximity());
+            } else {
+                pros::lcd::print(6, "Optical: NO PORT SET");
+            }
             pros::lcd::print(7, "Alliance: %s  Sort: %s",
                              alliance == Alliance::RED ? "RED" : "BLUE",
-                             sortingEnabled ? "on" : "OFF");
+                             (sortingEnabled && OPTICAL_OK) ? "on" : "OFF");
             // log position telemetry
             lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
             // delay to save resources
@@ -406,6 +443,8 @@ void skills() {
 void autonomous() {
     // redLeft();
     // redRight();
+    // blueLeft();
+    // blueRight();
     // does one time
     // skills();
 }
