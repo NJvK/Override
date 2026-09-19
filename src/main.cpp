@@ -90,32 +90,28 @@ int deadband(int value) {
 // and the anti-tip section at the top of the opcontrol loop.
 //
 enum class TipAxis { Y_PITCH, X_ROLL };
-constexpr TipAxis TIP_AXIS     = TipAxis::X_ROLL; // y-axis, nose up / nose down //x-axis since inertial is sideways
-constexpr double TIP_ANGLE_ON  = 4.5;   // activate sooner
+constexpr TipAxis TIP_AXIS     = TipAxis::X_ROLL;
+constexpr double TIP_RESTING_ANGLE = 5.0; // raw IMU reading when robot is level // y-axis, nose up / nose down //x-axis since inertial is sideways
+constexpr double TIP_ANGLE_ON  = 6.5;   // activate sooner
 constexpr double TIP_ANGLE_OFF = 2.0;   // give control back when nearly level
 constexpr double TIP_KP        = 9.0;   // stronger correction
 constexpr double TIP_MIN_POWER = 35.0;  // minimum correction once active
 constexpr double TIP_MAX_POWER = 110.0; // maximum correction power
-constexpr bool   TIP_INVERT    = true;  // flip if the robot pushes the wrong way
+constexpr bool   TIP_INVERT    = false;  // flip if the robot pushes the wrong way
 
 bool antiTipActive = false;
-
-// Raw IMU reading when the robot is sitting level.
-// This is measured automatically during initialize().
-double tipZeroOffset = 0.0;
 
 // Returns the lean angle on whichever axis is configured above.
 // Positive is treated as "nose up" (falling backward).
 double tipAngle() {
     double rawAngle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
 
-    // The IMU returns infinity while calibrating or if the port is unplugged.
     if (!std::isfinite(rawAngle)) {
         return 0.0;
     }
 
-    // Subtract the robot's resting angle so level becomes 0 degrees.
-    double correctedAngle = rawAngle - tipZeroOffset;
+    // The IMU rests at about 5 degrees, so treat 5 degrees as level.
+    double correctedAngle = rawAngle - TIP_RESTING_ANGLE;
 
     return TIP_INVERT ? -correctedAngle : correctedAngle;
 }
@@ -377,28 +373,6 @@ void initialize() {
     pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
 
-    // Measure the IMU's natural resting angle.
-    // Keep the robot still and level while initialize() runs.
-    double tipZeroSum = 0.0;
-    int tipZeroSamples = 0;
-
-    for (int i = 0; i < 25; i++) {
-        double reading = (TIP_AXIS == TipAxis::Y_PITCH)
-                             ? imu.get_pitch()
-                             : imu.get_roll();
-
-        if (std::isfinite(reading)) {
-            tipZeroSum += reading;
-            tipZeroSamples++;
-        }
-
-        pros::delay(10);
-    }
-
-    if (tipZeroSamples > 0) {
-        tipZeroOffset = tipZeroSum / tipZeroSamples;
-    }
-
     colorSensor.set_led_pwm(100);
     colorSensor.set_integration_time(20);
 
@@ -439,10 +413,9 @@ void initialize() {
             //                  tclawOn ? "on" : "off");
 
             // ANTI-TIP: uncomment these to pick the axis and check tuning
-            pros::lcd::print(4, "Raw Roll: %.2f Zero: %.2f",
-                             imu.get_roll(), tipZeroOffset);
-            pros::lcd::print(5, "Tip Angle: %.2f  %s",
-                             tipAngle(), antiTipActive ? "ACT" : "off");
+            pros::lcd::print(4, "Y/Pitch: %.1f", imu.get_pitch());
+            pros::lcd::print(5, "X/Roll: %.1f  Tip: %s",
+                             imu.get_roll(), antiTipActive ? "ACT" : "off");
 
             pros::lcd::print(6, "Hue: %.0f  Prox: %d",
                              colorSensor.get_hue(), colorSensor.get_proximity());
