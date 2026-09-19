@@ -92,7 +92,7 @@ int deadband(int value) {
 enum class TipAxis { Y_PITCH, X_ROLL };
 constexpr TipAxis TIP_AXIS     = TipAxis::X_ROLL;
 constexpr double TIP_RESTING_ANGLE = 5.0; // raw IMU reading when robot is level // y-axis, nose up / nose down //x-axis since inertial is sideways
-constexpr double TIP_ANGLE_ON  = 6.5;   // activate sooner
+constexpr double TIP_ANGLE_ON  = 5.5;   // activate sooner
 constexpr double TIP_ANGLE_OFF = 2.0;   // give control back when nearly level
 constexpr double TIP_KP        = 9.0;   // stronger correction
 constexpr double TIP_MIN_POWER = 35.0;  // minimum correction once active
