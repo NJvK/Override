@@ -239,7 +239,7 @@ constexpr double BLUE_HUE_MIN = 180.0;
 constexpr double BLUE_HUE_MAX = 250.0;
 
 constexpr int MIN_COLOR_PROXIMITY = 120;
-constexpr int TOGGLE_ROLLER_SPEED = 200;
+constexpr int TOGGLE_ROLLER_SPEED = -200;
 constexpr int COLOR_CONFIRM_MS = 50;
 constexpr int COLOR_TIMEOUT_MS = 1500;
 
