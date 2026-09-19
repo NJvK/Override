@@ -27,7 +27,7 @@
 //   left drive    17, 10 (both reversed)
 //   right drive   2, 1
 //   IMU           4
-//   DR4B          20, 13 (13 reversed)
+//   DR4B          20, 13 (20 reversed)
 //   intake        NOT SET  <-- see INTAKE_PORT below
 //   claw          ADI A
 //   orientation   ADI B
@@ -88,51 +88,51 @@ int deadband(int value) {
 // OTHER PLACES TO UNCOMMENT: the pitch/roll screen lines in initialize(),
 // and the anti-tip section at the top of the opcontrol loop.
 //
-// enum class TipAxis { Y_PITCH, X_ROLL };
-// constexpr TipAxis TIP_AXIS     = TipAxis::Y_PITCH; // y-axis, nose up / nose down
-// constexpr double TIP_ANGLE_ON  = 12.0;   // degrees of lean before taking over
-// constexpr double TIP_ANGLE_OFF = 4.0;    // degrees of lean before giving control back
-// constexpr double TIP_KP        = 6.0;    // motor power per degree past the threshold
-// constexpr double TIP_MAX_POWER = 100.0;  // cap on correction power, out of 127
-// constexpr bool   TIP_INVERT    = false;  // flip if the robot pushes the wrong way
-//
-// bool antiTipActive = false;
-//
-// // Returns the lean angle on whichever axis is configured above.
-// // Positive is treated as "nose up" (falling backward).
-// double tipAngle() {
-//     double angle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
-//     // the IMU returns infinity while calibrating or if the port is unplugged
-//     if (!std::isfinite(angle)) { return 0.0; }
-//     return TIP_INVERT ? -angle : angle;
-// }
-//
-// // Overwrites throttle and turn if a correction is needed.
-// // Returns true if anti-tip took control away from the driver.
-// bool antiTip(int& throttle, int& turn) {
-//     double angle = tipAngle();
-//     double lean = std::fabs(angle);
-//
-//     // hysteresis: turn on at the high threshold, off at the low one, so the
-//     // code does not flicker on and off right at the trigger point
-//     if (!antiTipActive && lean > TIP_ANGLE_ON) {
-//         antiTipActive = true;
-//     } else if (antiTipActive && lean < TIP_ANGLE_OFF) {
-//         antiTipActive = false;
-//     }
-//
-//     if (!antiTipActive) { return false; }
-//
-//     // the further past the threshold, the harder the correction
-//     double power = TIP_KP * (lean - TIP_ANGLE_OFF);
-//     if (power > TIP_MAX_POWER) { power = TIP_MAX_POWER; }
-//
-//     // nose up means the robot is falling backward, so drive backward to
-//     // catch it, and the other way around for nose down
-//     throttle = static_cast<int>(angle > 0 ? -power : power);
-//     turn = 0;
-//     return true;
-// }
+enum class TipAxis { Y_PITCH, X_ROLL };
+constexpr TipAxis TIP_AXIS     = TipAxis::X_ROLL; // y-axis, nose up / nose down //x-axis since inertial is sideways
+constexpr double TIP_ANGLE_ON  = 7.0;   // degrees of lean before taking over
+constexpr double TIP_ANGLE_OFF = 3.0;    // degrees of lean before giving control back
+constexpr double TIP_KP        = 6.0;    // motor power per degree past the threshold
+constexpr double TIP_MAX_POWER = 100.0;  // cap on correction power, out of 127
+constexpr bool   TIP_INVERT    = true;  // flip if the robot pushes the wrong way
+
+bool antiTipActive = false;
+
+// Returns the lean angle on whichever axis is configured above.
+// Positive is treated as "nose up" (falling backward).
+double tipAngle() {
+    double angle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
+    // the IMU returns infinity while calibrating or if the port is unplugged
+    if (!std::isfinite(angle)) { return 0.0; }
+    return TIP_INVERT ? -angle : angle;
+}
+
+// Overwrites throttle and turn if a correction is needed.
+// Returns true if anti-tip took control away from the driver.
+bool antiTip(int& throttle, int& turn) {
+    double angle = tipAngle();
+    double lean = std::fabs(angle);
+
+    // hysteresis: turn on at the high threshold, off at the low one, so the
+    // code does not flicker on and off right at the trigger point
+    if (!antiTipActive && lean > TIP_ANGLE_ON) {
+        antiTipActive = true;
+    } else if (antiTipActive && lean < TIP_ANGLE_OFF) {
+        antiTipActive = false;
+    }
+
+    if (!antiTipActive) { return false; }
+
+    // the further past the threshold, the harder the correction
+    double power = TIP_KP * (lean - TIP_ANGLE_OFF);
+    if (power > TIP_MAX_POWER) { power = TIP_MAX_POWER; }
+
+    // nose up means the robot is falling backward, so drive backward to
+    // catch it, and the other way around for nose down
+    throttle = static_cast<int>(angle > 0 ? -power : power);
+    turn = 0;
+    return true;
+}
 
 // drivetrain settings
 lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
@@ -193,8 +193,8 @@ lemlib::ExpoDriveCurve steerCurve(3, // joystick deadband out of 127
 // create the chassis
 lemlib::Chassis chassis(drivetrain, linearController, angularController, sensors, &throttleCurve, &steerCurve);
 
-pros::Motor DR4B1(20);
-pros::Motor DR4B2(-13);
+pros::Motor DR4B1(-20);
+pros::Motor DR4B2(13);
 
 // STILL NEEDS A REAL PORT. 0 is not a valid V5 port, so the intake will not
 // move until this is set to something between 1 and 21. Ports already taken:
@@ -202,11 +202,11 @@ pros::Motor DR4B2(-13);
 constexpr int INTAKE_PORT = 0;
 pros::Motor intake(INTAKE_PORT);
 
-pros::MotorGroup Toggle({0, 0});
+pros::MotorGroup Toggle({6, 8});
 
-pros::adi::DigitalOut tClaw('B'); // claw orientation piston, driven automatically
+pros::adi::DigitalOut tClaw('H'); // claw orientation piston, driven automatically
 // pros::adi::DigitalOut tClaw2('C');
-pros::adi::DigitalOut claw('A');  // claw open/close, driven by button A
+pros::adi::DigitalOut claw('B');  // claw open/close, driven by button A
 
 // ============================================================
 // COLOR SORT  [ DISABLED - uncomment this whole block to re-enable ]
@@ -376,9 +376,9 @@ void initialize() {
             //                  tclawOn ? "on" : "off");
 
             // ANTI-TIP: uncomment these to pick the axis and check tuning
-            // pros::lcd::print(4, "Y/Pitch: %.1f", imu.get_pitch());
-            // pros::lcd::print(5, "X/Roll: %.1f  Tip: %s",
-            //                  imu.get_roll(), antiTipActive ? "ACT" : "off");
+            pros::lcd::print(4, "Y/Pitch: %.1f", imu.get_pitch());
+            pros::lcd::print(5, "X/Roll: %.1f  Tip: %s",
+                             imu.get_roll(), antiTipActive ? "ACT" : "off");
 
             // COLOR SORT: uncomment these to check hue ranges and alliance
             // pros::lcd::print(6, "Hue: %.0f  Prox: %d",
@@ -472,7 +472,7 @@ void opcontrol() {
     chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
 
     // ANTI-TIP: uncomment
-    // bool tipWasActive = false;
+    bool tipWasActive = false;
 
     while (true) {
         // ---- drive ----
@@ -480,37 +480,37 @@ void opcontrol() {
         int rightX = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X));
 
         // move the chassis with curvature drive
-        chassis.arcade(leftY, 0.9 * rightX);
+        // chassis.arcade(leftY, 0.9 * rightX);
 
         // ANTI-TIP: to re-enable, comment out the single arcade line above
         // and uncomment everything from here down to the end of this block.
-        //
-        // // anti-tip check. if this returns true it has already overwritten
-        // // leftY and rightX with the correction it wants
-        // bool tipping = antiTip(leftY, rightX);
-        //
-        // if (tipping) {
-        //     // brake mode holds the wheels once the robot settles back down
-        //     if (!tipWasActive) {
-        //         chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_BRAKE);
-        //         controller.rumble("."); // one short buzz so the driver knows
-        //     }
-        //     // drive straight, no turning, while recovering
-        //     chassis.arcade(leftY, rightX);
-        // } else {
-        //     if (tipWasActive) {
-        //         chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
-        //     }
-        //     chassis.arcade(leftY, 0.9 * rightX);
-        // }
-        //
-        // tipWasActive = tipping;
+        
+        // anti-tip check. if this returns true it has already overwritten
+        // leftY and rightX with the correction it wants
+        bool tipping = antiTip(leftY, rightX);
+        
+        if (tipping) {
+            // brake mode holds the wheels once the robot settles back down
+            if (!tipWasActive) {
+                chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_BRAKE);
+                controller.rumble("."); // one short buzz so the driver knows
+            }
+            // drive straight, no turning, while recovering
+            chassis.arcade(leftY, rightX);
+        } else {
+            if (tipWasActive) {
+                chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
+            }
+            chassis.arcade(leftY, 0.9 * rightX);
+        }
+        
+        tipWasActive = tipping;
 
         // ---- L1 / L2: DR4B ----
         // ANTI-TIP: when re-enabling, change the L1 line to
         //   if (controller.get_digital(...L1) && !tipping)
         // so the lift cannot be raised mid-tip, which makes tipping worse.
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1) && !tipping) {
             DR4B1.move_velocity(200);
             DR4B2.move_velocity(200);
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
