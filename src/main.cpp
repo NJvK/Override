@@ -4,12 +4,12 @@
 #include "pros/distance.hpp"
 #include "pros/misc.h"
 #include "pros/motors.h"
-#include "pros/optical.hpp"
+// #include "pros/optical.hpp" // optical sensor disabled
 #include "pros/rotation.hpp"
 #include "pros/rtos.hpp"
 #include <iterator>
 #include <cmath>
-#include <cstdint>
+#include <cstdint> // only needed by disabled anti-tip/optical timing code
 #include "pros/screen.hpp"
 
 // ============================================================
@@ -17,11 +17,10 @@
 //   L1 / L2   DR4B up / down
 //   R1 / R2   intake in / out
 //   A         toggle claw open / closed
-//   automatic orientation piston follows DR4B height
+//   B         toggle claw orientation piston
+//   UP / DOWN manual roller spin
 //
-// ANTI-TIP and COLOR SORT are commented out right now. Search for
-// "ANTI-TIP" and "COLOR SORT" to find every block that has to be
-// uncommented to turn them back on. Each one is marked.
+// ANTI-TIP and OPTICAL SENSOR code are kept below but commented out.
 // ============================================================
 //
 // PORT MAP
@@ -29,9 +28,11 @@
 //   right drive   2, 1
 //   IMU           4
 //   DR4B          20, 13 (20 reversed)
+//   toggle roller 6, 8
+//   optical       3
 //   intake        NOT SET  <-- see INTAKE_PORT below
-//   claw          ADI A
-//   orientation   ADI B
+//   claw          ADI B
+//   orientation   ADI H
 //
 // Valid V5 smart ports are 1 through 21. Port 0 does not exist.
 // ============================================================
@@ -53,10 +54,10 @@ pros::Imu imu(4);
 // If you add tracking wheels back, uncomment these and put real ports in,
 // then put the pointers back into the OdomSensors block.
 //
-// pros::Rotation horizontalEnc(0);
-// pros::Rotation verticalEnc(-0);
-// lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
-// lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
+pros::Rotation horizontalEnc(-19);
+pros::Rotation verticalEnc(16);
+lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
+lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
 
 const double PI = 3.14159265358979323846;
 
@@ -65,85 +66,116 @@ int deadband(int value) {
     return value;
 }
 
-// ============================================================
-// ANTI-TIP  [ DISABLED - uncomment this whole block to re-enable ]
-// ============================================================
+// // ============================================================
+// // ANTI-TIP
+// // ============================================================
+// //
+// // How it works: the inertial sensor reports how far the robot is leaning.
+// // Once that lean passes TIP_ANGLE_ON, the driver's joystick is ignored and
+// // the drivetrain is driven toward the side the robot is falling, which pulls
+// // the wheels back under the center of gravity. Control goes back to the
+// // driver once the lean drops below TIP_ANGLE_OFF.
+// //
+// // TRIGGERING SOONER. Two things do this, and they stack:
+// //   1. TIP_ANGLE_ON lowered from 5.5 to 4.5 degrees.
+// //   2. TIP_LOOKAHEAD_S, which adds how fast the lean is growing on top of
+// //      how far it has already gone. A robot actually going over accelerates,
+// //      while a robot squatting under hard acceleration does not, so this
+// //      catches real tips early without lowering the bar for ordinary rocking.
+// //      Set it to 0.0 to turn the prediction off and go back to plain angle.
+// //
+// // AXIS: set to X_ROLL because the inertial sensor is mounted sideways.
+// // Line 5 of the brain screen shows the raw roll value.
+// //
+// // RESTING ANGLE: the sensor reads about 5 degrees with the robot level, so
+// // that gets subtracted out. Sit the robot level, read line 5, and put the
+// // real number here. If this is off by a degree, you lose a degree of margin.
+// //
+// // DIRECTION: put the robot on blocks so the wheels spin free, tilt it past
+// // the trigger angle, and watch the wheels. They should spin toward the low
+// // side. If they spin the wrong way, set TIP_INVERT to true.
+// //
+// enum class TipAxis { Y_PITCH, X_ROLL };
+// constexpr TipAxis TIP_AXIS         = TipAxis::X_ROLL; // inertial is mounted sideways
+// constexpr double TIP_RESTING_ANGLE = 5.0;   // raw IMU reading when robot is level
+// constexpr double TIP_ANGLE_ON      = 4.5;   // activate here (was 5.5)
+// constexpr double TIP_ANGLE_OFF     = 2.0;   // give control back when nearly level
+// constexpr double TIP_LOOKAHEAD_S   = 0.15;  // seconds of lean rate to look ahead, 0 disables
+// constexpr double TIP_KP            = 9.0;   // correction strength per degree
+// constexpr double TIP_MIN_POWER     = 35.0;  // minimum correction once active
+// constexpr double TIP_MAX_POWER     = 110.0; // maximum correction power
+// constexpr bool   TIP_INVERT        = false; // flip if the robot pushes the wrong way
 //
-// How it works: the inertial sensor reports how far the robot is leaning.
-// Once that lean passes TIP_ANGLE_ON, the driver's joystick is ignored and
-// the drivetrain is driven toward the side the robot is falling, which pulls
-// the wheels back under the center of gravity. Control goes back to the
-// driver once the lean drops below TIP_ANGLE_OFF.
+// bool antiTipActive = false;
 //
-// SETUP STEP 1: which axis.
-//   Set to the y-axis, which is pitch, meaning nose up and nose down.
-//   The x-axis is roll, meaning side to side. Lift the front of the robot by
-//   hand and confirm the y/pitch number is the one that moves. If it is the
-//   other one, change TIP_AXIS to TipAxis::X_ROLL.
+// // Returns the lean angle on whichever axis is configured above.
+// // Positive is treated as "nose up" (falling backward).
+// double tipAngle() {
+//     double rawAngle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
 //
-// SETUP STEP 2: direction.
-//   Put the robot on blocks so the wheels spin free, tilt it past the
-//   trigger angle, and watch the wheels. They should spin toward the low
-//   side. If they spin the wrong way, set TIP_INVERT to true.
+//     if (!std::isfinite(rawAngle)) {
+//         return 0.0;
+//     }
 //
-// OTHER PLACES TO UNCOMMENT: the pitch/roll screen lines in initialize(),
-// and the anti-tip section at the top of the opcontrol loop.
+//     // The IMU rests at about 5 degrees, so treat 5 degrees as level.
+//     double correctedAngle = rawAngle - TIP_RESTING_ANGLE;
 //
-enum class TipAxis { Y_PITCH, X_ROLL };
-constexpr TipAxis TIP_AXIS     = TipAxis::X_ROLL;
-constexpr double TIP_RESTING_ANGLE = 5.0; // raw IMU reading when robot is level // y-axis, nose up / nose down //x-axis since inertial is sideways
-constexpr double TIP_ANGLE_ON  = 5.5;   // activate sooner
-constexpr double TIP_ANGLE_OFF = 2.0;   // give control back when nearly level
-constexpr double TIP_KP        = 9.0;   // stronger correction
-constexpr double TIP_MIN_POWER = 35.0;  // minimum correction once active
-constexpr double TIP_MAX_POWER = 110.0; // maximum correction power
-constexpr bool   TIP_INVERT    = false;  // flip if the robot pushes the wrong way
-
-bool antiTipActive = false;
-
-// Returns the lean angle on whichever axis is configured above.
-// Positive is treated as "nose up" (falling backward).
-double tipAngle() {
-    double rawAngle = (TIP_AXIS == TipAxis::Y_PITCH) ? imu.get_pitch() : imu.get_roll();
-
-    if (!std::isfinite(rawAngle)) {
-        return 0.0;
-    }
-
-    // The IMU rests at about 5 degrees, so treat 5 degrees as level.
-    double correctedAngle = rawAngle - TIP_RESTING_ANGLE;
-
-    return TIP_INVERT ? -correctedAngle : correctedAngle;
-}
-
-// Overwrites throttle and turn if a correction is needed.
-// Returns true if anti-tip took control away from the driver.
-bool antiTip(int& throttle, int& turn) {
-    double angle = tipAngle();
-    double lean = std::fabs(angle);
-
-    // hysteresis: turn on at the high threshold, off at the low one, so the
-    // code does not flicker on and off right at the trigger point
-    if (!antiTipActive && lean > TIP_ANGLE_ON) {
-        antiTipActive = true;
-    } else if (antiTipActive && lean < TIP_ANGLE_OFF) {
-        antiTipActive = false;
-    }
-
-    if (!antiTipActive) { return false; }
-
-    // the further past the threshold, the harder the correction
-    double power = TIP_KP * (lean - TIP_ANGLE_OFF);
-    if (power < TIP_MIN_POWER) { power = TIP_MIN_POWER; }
-    if (power > TIP_MAX_POWER) { power = TIP_MAX_POWER; }
-
-    // nose up means the robot is falling backward, so drive backward to
-    // catch it, and the other way around for nose down
-    throttle = static_cast<int>(angle > 0 ? -power : power);
-    turn = 0;
-    return true;
-}
-
+//     return TIP_INVERT ? -correctedAngle : correctedAngle;
+// }
+//
+// // --- lean rate tracking, for the lookahead ---
+// double lastTipAngle = 0.0;
+// std::uint32_t lastTipTime = 0;
+//
+// // Current lean plus where it will be TIP_LOOKAHEAD_S from now at the rate it
+// // is currently moving. Leaning 4 degrees and holding stays under the
+// // threshold. Leaning 4 degrees while moving 30 deg/sec reads as 8.5 and
+// // trips immediately.
+// double predictedLean() {
+//     double angle = tipAngle();
+//     std::uint32_t now = pros::millis();
+//     double dt = (now - lastTipTime) / 1000.0;
+//
+//     double rate = 0.0;
+//     // ignore the first reading and any gap long enough to be a stale sample
+//     if (lastTipTime != 0 && dt > 0.001 && dt < 0.5) {
+//         rate = (angle - lastTipAngle) / dt; // degrees per second
+//     }
+//
+//     lastTipAngle = angle;
+//     lastTipTime = now;
+//
+//     return angle + rate * TIP_LOOKAHEAD_S;
+// }
+//
+// // Overwrites throttle and turn if a correction is needed.
+// // Returns true if anti-tip took control away from the driver.
+// bool antiTip(int& throttle, int& turn) {
+//     double angle = tipAngle();          // drives which way to correct
+//     double lean = std::fabs(predictedLean()); // drives whether to correct at all
+//
+//     // hysteresis: turn on at the high threshold, off at the low one, so the
+//     // code does not flicker on and off right at the trigger point
+//     if (!antiTipActive && lean > TIP_ANGLE_ON) {
+//         antiTipActive = true;
+//     } else if (antiTipActive && lean < TIP_ANGLE_OFF) {
+//         antiTipActive = false;
+//     }
+//
+//     if (!antiTipActive) { return false; }
+//
+//     // the further past the threshold, the harder the correction
+//     double power = TIP_KP * (lean - TIP_ANGLE_OFF);
+//     if (power < TIP_MIN_POWER) { power = TIP_MIN_POWER; }
+//     if (power > TIP_MAX_POWER) { power = TIP_MAX_POWER; }
+//
+//     // nose up means the robot is falling backward, so drive backward to
+//     // catch it, and the other way around for nose down
+//     throttle = static_cast<int>(angle > 0 ? -power : power);
+//     turn = 0;
+//     return true;
+// }
+//
 // drivetrain settings
 lemlib::Drivetrain drivetrain(&leftMotors, // left motor group
                               &rightMotors, // right motor group
@@ -180,13 +212,13 @@ lemlib::ControllerSettings angularController(3.7, // proportional gain (kP)
 // sensors for odometry
 // no tracking wheels connected, so odometry runs on the IMU plus the drive
 // motor encoders
-lemlib::OdomSensors sensors(
-    nullptr, // vertical tracking wheel
+lemlib::OdomSensors sensors = {
+    &vertical, // vertical tracking wheel
     nullptr, // no second vertical tracking wheel
-    nullptr, // horizontal tracking wheel
+    &horizontal, // horizontal tracking wheel
     nullptr, // no second horizontal tracking wheel
     &imu // inertial sensor
-);
+};
 
 // input curve for throttle input during driver control
 lemlib::ExpoDriveCurve throttleCurve(3, // joystick deadband out of 127
@@ -208,128 +240,139 @@ pros::Motor DR4B2(13);
 
 // STILL NEEDS A REAL PORT. 0 is not a valid V5 port, so the intake will not
 // move until this is set to something between 1 and 21. Ports already taken:
-// 1, 2, 4, 10, 13, 17, 20.
+// 1, 2, 3, 4, 6, 8, 10, 13, 17, 20.
 constexpr int INTAKE_PORT = 0;
 pros::Motor intake(INTAKE_PORT);
 
 pros::MotorGroup Toggle({6, 8});
 
-pros::adi::DigitalOut tClaw('H'); // claw orientation piston, driven automatically
-// pros::adi::DigitalOut tClaw2('C');
-pros::adi::DigitalOut claw('B');  // claw open/close, driven by button A
+pros::adi::DigitalOut tClaw('H'); // claw orientation piston
+pros::adi::DigitalOut claw('B');  // claw open/close
 
-// ============================================================
-// TOGGLE ROLLER COLOR ALIGNMENT
-// ============================================================
+// // ============================================================
+// // TOGGLE ROLLER COLOR ALIGNMENT
+// // ============================================================
+// //
+// // A starts automatic roller alignment.
+// // Both half motors on ports 6 and 8 spin until the optical sensor sees
+// // the selected alliance color. UP and DOWN still manually spin the rollers.
+// //
+// // Change OPTICAL_PORT to the actual smart port used by your optical sensor.
+// constexpr int OPTICAL_PORT = 3;
+// pros::Optical colorSensor(OPTICAL_PORT);
 //
-// A starts automatic roller alignment.
-// Both half motors on ports 6 and 8 spin until the optical sensor sees
-// the selected alliance color. UP and DOWN still manually spin the rollers.
+// enum class Alliance { RED, BLUE };
+// Alliance alliance = Alliance::BLUE;
 //
-// Change OPTICAL_PORT to the actual smart port used by your optical sensor.
-constexpr int OPTICAL_PORT = 3;
-pros::Optical colorSensor(OPTICAL_PORT);
-
-enum class Alliance { RED, BLUE };
-Alliance alliance = Alliance::BLUE;
-
-constexpr double RED_HUE_MAX  = 30.0;
-constexpr double RED_HUE_WRAP = 330.0;
-constexpr double BLUE_HUE_MIN = 180.0;
-constexpr double BLUE_HUE_MAX = 250.0;
-
-constexpr int MIN_COLOR_PROXIMITY = 120;
-constexpr int TOGGLE_ROLLER_SPEED = -200;
-constexpr int COLOR_CONFIRM_MS = 50;
-constexpr int COLOR_TIMEOUT_MS = 1500;
-
-bool toggleColorActive = false;
-std::uint32_t toggleColorStart = 0;
-std::uint32_t targetColorSeenStart = 0;
-
-bool hueIsRed(double hue) {
-    return hue <= RED_HUE_MAX || hue >= RED_HUE_WRAP;
-}
-
-bool hueIsBlue(double hue) {
-    return hue >= BLUE_HUE_MIN && hue <= BLUE_HUE_MAX;
-}
-
-bool seesAllianceColor() {
-    int proximity = colorSensor.get_proximity();
-    if (proximity < MIN_COLOR_PROXIMITY || proximity > 255) {
-        return false;
-    }
-
-    double hue = colorSensor.get_hue();
-    if (!std::isfinite(hue)) {
-        return false;
-    }
-
-    return alliance == Alliance::RED ? hueIsRed(hue) : hueIsBlue(hue);
-}
-
-void stopToggleColorAlign() {
-    toggleColorActive = false;
-    targetColorSeenStart = 0;
-    Toggle.move_velocity(0);
-}
-
-void startToggleColorAlign() {
-    toggleColorActive = true;
-    toggleColorStart = pros::millis();
-    targetColorSeenStart = 0;
-}
-
-void updateToggleColorAlign() {
-    if (!toggleColorActive) {
-        return;
-    }
-
-    std::uint32_t now = pros::millis();
-
-    if (now - toggleColorStart >= COLOR_TIMEOUT_MS) {
-        stopToggleColorAlign();
-        return;
-    }
-
-    if (seesAllianceColor()) {
-        if (targetColorSeenStart == 0) {
-            targetColorSeenStart = now;
-        }
-
-        if (now - targetColorSeenStart >= COLOR_CONFIRM_MS) {
-            stopToggleColorAlign();
-            controller.rumble(".");
-            return;
-        }
-    } else {
-        targetColorSeenStart = 0;
-    }
-
-    Toggle.move_velocity(TOGGLE_ROLLER_SPEED);
-}
-
-void runToggleToAllianceColor() {
-    startToggleColorAlign();
-
-    while (toggleColorActive) {
-        updateToggleColorAlign();
-        pros::delay(10);
-    }
-}
-
+// constexpr double RED_HUE_MAX  = 30.0;
+// constexpr double RED_HUE_WRAP = 330.0;
+// constexpr double BLUE_HUE_MIN = 180.0;
+// constexpr double BLUE_HUE_MAX = 250.0;
+//
+// constexpr int MIN_COLOR_PROXIMITY = 120;
+// constexpr int TOGGLE_ROLLER_SPEED = -200;
+// constexpr int COLOR_CONFIRM_MS = 50;
+// constexpr int COLOR_TIMEOUT_MS = 1500;
+//
+// bool toggleColorActive = false;
+// std::uint32_t toggleColorStart = 0;
+// std::uint32_t targetColorSeenStart = 0;
+//
+// bool hueIsRed(double hue) {
+//     return hue <= RED_HUE_MAX || hue >= RED_HUE_WRAP;
+// }
+//
+// bool hueIsBlue(double hue) {
+//     return hue >= BLUE_HUE_MIN && hue <= BLUE_HUE_MAX;
+// }
+//
+// bool seesAllianceColor() {
+//     int proximity = colorSensor.get_proximity();
+//     if (proximity < MIN_COLOR_PROXIMITY || proximity > 255) {
+//         return false;
+//     }
+//
+//     double hue = colorSensor.get_hue();
+//     if (!std::isfinite(hue)) {
+//         return false;
+//     }
+//
+//     return alliance == Alliance::RED ? hueIsRed(hue) : hueIsBlue(hue);
+// }
+//
+// void stopToggleColorAlign() {
+//     toggleColorActive = false;
+//     targetColorSeenStart = 0;
+//     Toggle.move_velocity(0);
+// }
+//
+// void startToggleColorAlign() {
+//     toggleColorActive = true;
+//     toggleColorStart = pros::millis();
+//     targetColorSeenStart = 0;
+// }
+//
+// void updateToggleColorAlign() {
+//     if (!toggleColorActive) {
+//         return;
+//     }
+//
+//     std::uint32_t now = pros::millis();
+//
+//     if (now - toggleColorStart >= COLOR_TIMEOUT_MS) {
+//         stopToggleColorAlign();
+//         return;
+//     }
+//
+//     if (seesAllianceColor()) {
+//         if (targetColorSeenStart == 0) {
+//             targetColorSeenStart = now;
+//         }
+//
+//         if (now - targetColorSeenStart >= COLOR_CONFIRM_MS) {
+//             stopToggleColorAlign();
+//             controller.rumble(".");
+//             return;
+//         }
+//     } else {
+//         targetColorSeenStart = 0;
+//     }
+//
+//     Toggle.move_velocity(TOGGLE_ROLLER_SPEED);
+// }
+//
+// void runToggleToAllianceColor() {
+//     startToggleColorAlign();
+//
+//     while (toggleColorActive) {
+//         updateToggleColorAlign();
+//         pros::delay(10);
+//     }
+// }
+//
 // ============================================================
 // CLAW
 // ============================================================
 
-// --- open / close, toggled by button A ---
 bool clawOn = false;
 bool tclawOn = true; // starts down, so starts activated
 
+constexpr std::uint32_t CLAW_DELAY_MS = 250;
+std::uint32_t lastClawChange = 0;
+
 void toggleClaw() {
+    std::uint32_t now = pros::millis();
+
+    // Don't allow the claw to switch again until 150 ms has passed.
+    if (lastClawChange != 0 &&
+        now - lastClawChange < CLAW_DELAY_MS) {
+        return;
+    }
+
     clawOn = !clawOn;
     claw.set_value(clawOn);
+
+    lastClawChange = now;
 }
 
 void toggleClawO() {
@@ -337,27 +380,23 @@ void toggleClawO() {
     tClaw.set_value(tclawOn);
 }
 
-// --- orientation piston, automatic ---
+// --- orientation piston, automatic [ DISABLED ] ---
 //
-// The piston is ON whenever the DR4B is sitting at its starting position and
-// OFF once the lift is raised. There is no sensor on the lift, so this uses
-// the DR4B motor encoder, which gets zeroed in initialize(). THE LIFT MUST BE
-// ALL THE WAY DOWN WHEN THE PROGRAM STARTS or every reading will be off.
+// The piston was driven off the DR4B motor encoder: ON when the lift sits at
+// its starting position, OFF once raised. Now on manual toggle with B.
+// To go back to automatic, uncomment this block, the screen line in
+// initialize(), and the updateClawOrientation() calls in DR4B() and the
+// opcontrol loop.
 //
-// Two thresholds instead of one so the piston does not chatter when the lift
-// hovers right at the boundary. Read live lift position off line 3 of the
-// brain screen to pick your numbers.
 // constexpr double DR4B_DOWN_POS = 25;  // below this, the lift counts as down
 // constexpr double DR4B_UP_POS   = 60;  // above this, the lift counts as up
-
-// bool tclawOn = true; // starts down, so starts activated
-
+//
 // double dr4bPosition() {
 //     double pos = DR4B1.get_position();
 //     if (!std::isfinite(pos)) { return 0.0; } // motor unplugged
 //     return pos;
 // }
-
+//
 // void updateClawOrientation() {
 //     double pos = dr4bPosition();
 //     if (!tclawOn && pos < DR4B_DOWN_POS) {
@@ -373,24 +412,21 @@ void initialize() {
     pros::lcd::initialize(); // initialize brain screen
     chassis.calibrate(); // calibrate sensors
 
-    colorSensor.set_led_pwm(100);
-    colorSensor.set_integration_time(20);
+    // OPTICAL SENSOR DISABLED
+    // colorSensor.set_led_pwm(100);
+    // colorSensor.set_integration_time(20);
 
-    // zero the lift encoders. the DR4B must be physically all the way down
-    // right now for the orientation piston logic to work.
+    // zero the lift encoders with the DR4B physically all the way down
     DR4B1.tare_position();
     DR4B2.tare_position();
-    // hold, so the lift does not sag back down past the piston threshold
-    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    // hold, so the lift does not sag under its own weight
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
 
-    // lift starts down, so the orientation piston starts activated
+    // starting pneumatic states
     tclawOn = true;
     tClaw.set_value(true);
     claw.set_value(clawOn);
-
-    // COLOR SORT: uncomment to start the sorting task
-    // pros::Task sortTask(colorSortTask);
 
     // the default rate is 50. however, if you need to change the rate, you
     // can do the following.
@@ -407,21 +443,22 @@ void initialize() {
             pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
             pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
             pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
-            // lift position, for setting DR4B_DOWN_POS and DR4B_UP_POS
-            // pros::lcd::print(3, "Lift: %.0f  Ort: %s",
-            //                  dr4bPosition(),
-            //                  tclawOn ? "on" : "off");
 
-            // ANTI-TIP: uncomment these to pick the axis and check tuning
-            pros::lcd::print(4, "Y/Pitch: %.1f", imu.get_pitch());
-            pros::lcd::print(5, "X/Roll: %.1f  Tip: %s",
-                             imu.get_roll(), antiTipActive ? "ACT" : "off");
+            // // ANTI-TIP tuning. "Lean" is the corrected angle, "Pred" is that
+            // // plus the lookahead. Pred is what the trigger actually compares
+            // // against, so watch the gap between them while driving.
+            // pros::lcd::print(3, "Lean: %.1f  Pred: %.1f",
+            // tipAngle(), predictedLean());
+            // pros::lcd::print(4, "Y/Pitch: %.1f", imu.get_pitch());
+            // pros::lcd::print(5, "X/Roll: %.1f  Tip: %s",
+            // imu.get_roll(), antiTipActive ? "ACT" : "off");
 
-            pros::lcd::print(6, "Hue: %.0f  Prox: %d",
-                             colorSensor.get_hue(), colorSensor.get_proximity());
-            pros::lcd::print(7, "Alliance: %s Roller: %s",
-                             alliance == Alliance::RED ? "RED" : "BLUE",
-                             toggleColorActive ? "AUTO" : "off");
+            // pros::lcd::print(6, "Hue: %.0f  Prox: %d",
+            // colorSensor.get_hue(), colorSensor.get_proximity());
+            // pros::lcd::print(7, "Alliance: %s Roller: %s",
+            // alliance == Alliance::RED ? "RED" : "BLUE",
+            // toggleColorActive ? "AUTO" : "off");
+
 
             // log position telemetry
             lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
@@ -455,48 +492,44 @@ void exit_condition(lemlib::Pose target, double exitDist) {
     chassis.cancelMotion();
 }
 
-void DR4B(float speed, int time) {
+void DR4B(float speed) {
     DR4B2.move_velocity(speed);
     DR4B1.move_velocity(speed);
-    pros::delay(time);
+}
+
+void DR4BStop() {
     DR4B2.move_velocity(0);
     DR4B1.move_velocity(0);
-    // keep the orientation piston in step with the new lift height
-    // updateClawOrientation();
 }
-
 void redLeft() {
-    alliance = Alliance::RED;
-}
-
-void redRight() {
-    alliance = Alliance::RED;
-}
-
-void blueLeft() {
-    alliance = Alliance::BLUE;
-
+    // alliance = Alliance::RED; // optical sensor disabled
     // set the starting position for the robot
     chassis.setPose(60.757, -2.321, 335.39);
 
     // moves back to toggle for roller using flex wheel mech
     chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
-    // color sort stuff with flex wheel toggle
+    chassis.moveToPose(60.757, -2.321, 335.39, 1000);
+    chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
+    // gets toggle ^^^^^^^
     chassis.moveToPose(60.176, 2.705, 304.768, 1000);
     chassis.moveToPose(47.646, 8.123, 0, 1000);
     // lifts up DR4B to score preloads
+    DR4B(60);
     chassis.moveToPose(46.981, 18.713, 358.449, 1000);
-    // score preloads/toggle claw
+    toggleClaw();// score preloads/toggle claw
 
     chassis.moveToPose(44.728, 8.305, 41.698, 1000, {.forwards = false});// moves back
     // move DR4B down to pick up more pins
+    DR4B(-30);
     chassis.moveToPose(56.366, 23.274, 90.777, 1000);
+    DR4BStop();
     chassis.moveToPose(65.356, 23.171, 89.119, 1000, {.maxSpeed = 50, });// moves slower
     // picks up pins
+    toggleClaw();
     chassis.moveToPose(60.473, 23.059, 91.173, 1000, {.forwards = false});// moves back
     chassis.moveToPose(50.656, 22.985, 271.853, 1000);
     // score pins
-
+    toggleClaw();
     chassis.moveToPose(58.561, 22.914, 270.113, 1000, {.forwards = false});// moves back
     chassis.moveToPose(47.105, -6.802, 113.795, 1000, {.maxSpeed = 90, .minSpeed = 50,});// moves to allign with pick up more pins
     chassis.moveToPose(57.865, -23.834, 90.346, 1000);
@@ -504,25 +537,219 @@ void blueLeft() {
     chassis.moveToPose(61.021, -23.978, 86.23, 1000, {.forwards = false});// moves back 
     chassis.moveToPose(56.812, -24.014, 272.699, 1000);
     // lift up DR4B to score pins
+    DR4B(60);
     chassis.moveToPose(51.164, -24.063, 276.657, 1000);
     // score pins
+    toggleClaw();
+}
+
+void redRight() {
+    // alliance = Alliance::RED; // optical sensor disabled
+    chassis.setPose(9.712, 62.005, 143.063);
+
+    chassis.moveToPose(5.772, 67.051, 141.808, 1000, {.forwards = false}); // reverse
+    // toggle
+    toggleClaw();
+    chassis.moveToPose(14.788, 55.158, 135.534, 1000);
+    // move DR4B up
+    DR4B(40);
+    chassis.moveToPose(20.144, 49.583, 134.468, 1000, {.maxSpeed = 50}); // move slow
+    chassis.moveToPose(14.65, 55.277, 182.499, 1000, {.forwards = false}); // reverse
+    // move DR4B down
+    DR4B(-50);
+    chassis.moveToPose(12.777, 24.208, 93.799, 1000);
+    DR4BStop();
+    chassis.moveToPose(20.289, 23.374, 90.975, 1000, {.maxSpeed = 50}); // slow
+    // toggle claw
+    toggleClaw();
+    chassis.moveToPose(6.577, 25.931, 45.035, 1000, {.maxSpeed = 50});// slow
+    // move DR4B up
+    DR4B(50);
+    chassis.moveToPose(20.743, 44.036, 42.701, 1000);
+    // toggle claw
+    toggleClaw();
+    chassis.moveToPose(14.762, 36.52, 38.802, 1000, {.forwards = false}); // reverse
+    // move DR4B down
+    DR4B(-50);
+    chassis.moveToPose(-23.857, 54.275, 0, 1000);
+    DR4BStop();
+    chassis.moveToPose(-23.482, 63.729, 0, 1000, {.maxSpeed = 60}); // slow
+    chassis.moveToPose(-23.449, 58.258, 0, 1000, {.forwards = false}); // reverse
+    // move DR4B up
+    DR4B(50);
+    chassis.moveToPose(-26.737, 49.893, 134.928, 1000);
+    DR4B(-70);
+    pros::delay(300);
+    // toggle claw
+    toggleClaw();
+
+}
+
+void blueLeft() {
+    // alliance = Alliance::BLUE; // optical sensor disabled
+
+    // set the starting position for the robot
+    chassis.setPose(0, 0, 0);
+    chassis.moveToPoint(0, 10, 1000);
+    chassis.waitUntilDone();
+    chassis.moveToPoint(0, -5, 1000, {.forwards = false}); // moves to toggle
+    chassis.waitUntilDone();
+    // chassis.moveToPose(0, -10, 0, 1000, {.minSpeed = 60}); // moves to starting position
+    // chassis.moveToPose(0, 5, 0, 1000, {.forwards = false, .minSpeed = 60}); // moves to toggle
+
+    // chassis.moveToPose();
+
+
+    // // moves back to toggle for roller using flex wheel mech
+    // chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
+    // chassis.moveToPose(60.757, -2.321, 335.39, 1000);
+    // chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
+    // // gets toggle ^^^^^^^
+    // chassis.moveToPose(60.176, 2.705, 304.768, 1000);
+    // chassis.moveToPose(47.646, 8.123, 0, 1000);
+    // // lifts up DR4B to score preloads
+    // DR4B(60);
+    // chassis.moveToPose(46.981, 18.713, 358.449, 1000);
+    // toggleClaw();// score preloads/toggle claw
+
+    // chassis.moveToPose(44.728, 8.305, 41.698, 1000, {.forwards = false});// moves back
+    // // move DR4B down to pick up more pins
+    // DR4B(-30);
+    // chassis.moveToPose(56.366, 23.274, 90.777, 1000);
+    // DR4BStop();
+    // chassis.moveToPose(65.356, 23.171, 89.119, 1000, {.maxSpeed = 50, });// moves slower
+    // // picks up pins
+    // toggleClaw();
+    // chassis.moveToPose(60.473, 23.059, 91.173, 1000, {.forwards = false});// moves back
+    // chassis.moveToPose(50.656, 22.985, 271.853, 1000);
+    // // score pins
+    // toggleClaw();
+    // chassis.moveToPose(58.561, 22.914, 270.113, 1000, {.forwards = false});// moves back
+    // chassis.moveToPose(47.105, -6.802, 113.795, 1000, {.maxSpeed = 90, .minSpeed = 50,});// moves to allign with pick up more pins
+    // chassis.moveToPose(57.865, -23.834, 90.346, 1000);
+    // chassis.moveToPose(67.075, -23.726, 87.604, 1000, {.maxSpeed = 40});// moves slow
+    // chassis.moveToPose(61.021, -23.978, 86.23, 1000, {.forwards = false});// moves back 
+    // chassis.moveToPose(56.812, -24.014, 272.699, 1000);
+    // // lift up DR4B to score pins
+    // DR4B(60);
+    // chassis.moveToPose(51.164, -24.063, 276.657, 1000);
+    // // score pins
+    // toggleClaw();
 }
 
 void blueRight() {
-    alliance = Alliance::BLUE;
+    // alliance = Alliance::BLUE; // optical sensor disabled
+    chassis.setPose(9.712, 62.005, 143.063);
+
+    chassis.moveToPose(5.772, 67.051, 141.808, 1000, {.forwards = false}); // reverse
+    // toggle
+    toggleClaw();
+    chassis.moveToPose(14.788, 55.158, 135.534, 1000);
+    // move DR4B up
+    DR4B(40);
+    chassis.moveToPose(20.144, 49.583, 134.468, 1000, {.maxSpeed = 50}); // move slow
+    chassis.moveToPose(14.65, 55.277, 182.499, 1000, {.forwards = false}); // reverse
+    // move DR4B down
+    DR4B(-50);
+    chassis.moveToPose(12.777, 24.208, 93.799, 1000);
+    DR4BStop();
+    chassis.moveToPose(20.289, 23.374, 90.975, 1000, {.maxSpeed = 50}); // slow
+    // toggle claw
+    toggleClaw();
+    chassis.moveToPose(6.577, 25.931, 45.035, 1000, {.maxSpeed = 50});// slow
+    // move DR4B up
+    DR4B(50);
+    chassis.moveToPose(20.743, 44.036, 42.701, 1000);
+    // toggle claw
+    toggleClaw();
+    chassis.moveToPose(14.762, 36.52, 38.802, 1000, {.forwards = false}); // reverse
+    // move DR4B down
+    DR4B(-50);
+    chassis.moveToPose(-23.857, 54.275, 0, 1000);
+    DR4BStop();
+    chassis.moveToPose(-23.482, 63.729, 0, 1000, {.maxSpeed = 60}); // slow
+    chassis.moveToPose(-23.449, 58.258, 0, 1000, {.forwards = false}); // reverse
+    // move DR4B up
+    DR4B(50);
+    chassis.moveToPose(-26.737, 49.893, 134.928, 1000);
+    DR4B(-70);
+    pros::delay(300);
+    // toggle claw
+    toggleClaw();
 }
 
 void skills() {
-    // COLOR SORT: uncomment and set whichever color you run skills with
-    // alliance = Alliance::RED;
+    // set whichever color you run skills with
+    // alliance = Alliance::RED; // optical sensor disabled
+    chassis.setPose(-62.271, -2.261, 141.065); // sets pose
+
+    chassis.moveToPose(-65.222, 0.885, 136.589, 1000); // moves to toggle // reverse
+    toggleClaw(); // toggle
+    chassis.moveToPose(-55.178, -11.976, 140.482, 1000);// moves to score preload
+    // move DR4B up to score preload
+    chassis.moveToPose(-49.088, -19.926, 141.982, 1000);
+    // toggle claw
+    chassis.moveToPose(-57.51, -4.495, 180.024, 1000);
+    // move DR4B down to pick up pins
+    chassis.moveToPose(-51.842, -49.807, 211.825, 1000); // nothing
+    chassis.moveToPose(-56.65, -58.291, 272.857, 1000); // nothing
+    chassis.moveToPose(-65.628, -58.321, 269.291, 1000); // move slow
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-49.929, -58.28, 325.927, 1000); // move reverse
+    chassis.moveToPose(-60.721, -34.917, 52.578, 1000);
+    // moves DR4B up to score pins
+    chassis.moveToPose(-48.848, -25.755, 44.701, 1000);
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-60.664, -34.952, 156.044, 1000); // move reverse
+    // moves DR4B down to pick up pins
+    chassis.moveToPose(-50.01, -58.351, 268.979, 1000);
+    chassis.moveToPose(-65.523, -58.389, 269.522, 1000);// move slow
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-49.863, -58.45, 269.827, 1000); // move reverse
+    chassis.moveToPose(-60.527, -34.794, 54.296, 1000);
+    // moves DR4B up to score pins
+    chassis.moveToPose(-48.82, -25.858, 41.362, 1000);
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-60.508, -34.898, 158.199, 1000); // move reverse
+    // moves DR4B down to pick up pins
+    chassis.moveToPose(-49.871, -58.333, 270.01, 1000);
+    chassis.moveToPose(-65.542, -58.347, 270.924, 1000);// move slow
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-49.836, -58.343, 269.462, 1000); // move reverse
+    chassis.moveToPose(-60.5, -34.833, 52.189, 1000);
+    // moves DR4B up to score pins
+    chassis.moveToPose(-48.928, -26.053, 43.815, 1000);
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-60.546, -34.681, 53.848, 1000); // reverse
+    // move DR4B down to pick up pins
+    chassis.moveToPose(-50.011, -58.397, 270.161, 1000);
+    chassis.moveToPose(-65.67, -58.5, 268.423, 1000); // move slow
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-49.915, -58.351, 269.293, 1000); // reverse
+    chassis.moveToPose(-60.372, -34.652, 53.168, 1000);
+    // move DR4B up to score pins
+    chassis.moveToPose(-48.798, -25.904, 43.582, 1000);
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-60.127, -34.655, 0, 1000); // reverse
+    // move DR4B down to pick up pins
+    chassis.moveToPose(-49.776, -58.351, 269.165, 1000); // reverse
+    chassis.moveToPose(-65.746, -58.522, 268.487, 1000); // move slow
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-49.877, -58.43, 269.79, 1000); // reverse
+    chassis.moveToPose(-60.106, -34.407, 52.688, 1000);
+    // move DR4B up to score pins
+    chassis.moveToPose(-48.721, -25.93, 41.824, 1000);
+    toggleClaw(); // toggle claw
+    chassis.moveToPose(-42.608, -35.421, 52.647, 1000); // reverse
+    // move DR4B down to pick up pins
+    chassis.moveToPose(-0.291, -0.473, 0, 1000, {.minSpeed = 200}); // fast
 }
 
 void autonomous() {
     // redLeft();
     // redRight();
-    // blueLeft();
+    blueLeft();
     // blueRight();
-    // does one time
     // skills();
 }
 
@@ -534,46 +761,19 @@ void opcontrol() {
     // loop to continuously update motors
     chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
 
-    // ANTI-TIP: uncomment
-    bool tipWasActive = false;
+    // ANTI-TIP DISABLED
+    // bool tipWasActive = false;
 
     while (true) {
         // ---- drive ----
         int leftY = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
         int rightX = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X));
 
-        // move the chassis with curvature drive
-        // chassis.arcade(leftY, 0.9 * rightX);
-
-        // ANTI-TIP: to re-enable, comment out the single arcade line above
-        // and uncomment everything from here down to the end of this block.
-        
-        // anti-tip check. if this returns true it has already overwritten
-        // leftY and rightX with the correction it wants
-        bool tipping = antiTip(leftY, rightX);
-        
-        if (tipping) {
-            // brake mode holds the wheels once the robot settles back down
-            if (!tipWasActive) {
-                chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_BRAKE);
-                controller.rumble("."); // one short buzz so the driver knows
-            }
-            // drive straight, no turning, while recovering
-            chassis.arcade(leftY, rightX);
-        } else {
-            if (tipWasActive) {
-                chassis.setBrakeMode(pros::motor_brake_mode_e::E_MOTOR_BRAKE_COAST);
-            }
-            chassis.arcade(leftY, 0.9 * rightX);
-        }
-        
-        tipWasActive = tipping;
+        // Normal driver control with no anti-tip override.
+        chassis.arcade(leftY, 0.9 * rightX);
 
         // ---- L1 / L2: DR4B ----
-        // ANTI-TIP: when re-enabling, change the L1 line to
-        //   if (controller.get_digital(...L1) && !tipping)
-        // so the lift cannot be raised mid-tip, which makes tipping worse.
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1) && !tipping) {
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
             DR4B1.move_velocity(200);
             DR4B2.move_velocity(200);
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
@@ -585,47 +785,36 @@ void opcontrol() {
         }
 
         // ---- R1 / R2: intake ----
-        // COLOR SORT: with sorting off, the intake is driven straight from
-        // here. When re-enabling, swap these three intake.move() calls back
-        // to intakeCommand = 127 / -127 / 0, because the sorting task then
-        // owns the motor and the two would fight over it.
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
-            intake.move_velocity(200);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-            intake.move_velocity(-200);
-        } else {
-            intake.move_velocity(0);
-        }
-
-        // A starts automatic toggle roller color alignment.
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
-            startToggleColorAlign();
-        }
-
-        // X now opens/closes the claw because A is used for the roller.
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
             toggleClaw();
-        }
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
 
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
-            toggleClawO();
-        }
-
-        // Manual roller control cancels automatic color alignment.
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
-            toggleColorActive = false;
-            Toggle.move_velocity(TOGGLE_ROLLER_SPEED);
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
-            toggleColorActive = false;
-            Toggle.move_velocity(-TOGGLE_ROLLER_SPEED);
-        } else if (toggleColorActive) {
-            updateToggleColorAlign();
         } else {
-            Toggle.move_velocity(0);
+
         }
 
-        // ---- orientation piston follows the lift, no button needed ----
-        // updateClawOrientation();
+        // ---- A: claw open / closed ----
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
+            
+        }
+
+        // ---- B: claw orientation piston ----
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
+            
+        }
+
+        // ---- UP / DOWN: manual toggle roller ----
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
+
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
+
+        } else {
+
+        }
+
+        // OPTICAL SENSOR AUTO-ALIGN DISABLED
+        // To bring it back later, uncomment the optical section above
+        // and restore the automatic roller calls here.
 
         // delay to save resources
         pros::delay(10);
