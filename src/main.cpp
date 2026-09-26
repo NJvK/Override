@@ -1,5 +1,6 @@
 #include "main.h"
 #include "lemlib/api.hpp" // IWYU pragma: keep
+#include "lemlib/chassis/chassis.hpp"
 #include "pros/adi.hpp"
 #include "pros/distance.hpp"
 #include "pros/misc.h"
@@ -54,8 +55,8 @@ pros::Imu imu(4);
 // If you add tracking wheels back, uncomment these and put real ports in,
 // then put the pointers back into the OdomSensors block.
 //
-pros::Rotation horizontalEnc(-19);
-pros::Rotation verticalEnc(16);
+pros::Rotation horizontalEnc(19);
+pros::Rotation verticalEnc(-16);
 lemlib::TrackingWheel horizontal(&horizontalEnc, lemlib::Omniwheel::NEW_275, -5.75);
 lemlib::TrackingWheel vertical(&verticalEnc, lemlib::Omniwheel::NEW_275, -2.5);
 
@@ -420,8 +421,8 @@ void initialize() {
     DR4B1.tare_position();
     DR4B2.tare_position();
     // hold, so the lift does not sag under its own weight
-    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
-    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
     // starting pneumatic states
     tclawOn = true;
@@ -585,170 +586,103 @@ void redRight() {
 
 }
 
-void blueLeft() {
+void blueRight() {
     // alliance = Alliance::BLUE; // optical sensor disabled
-
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
     // set the starting position for the robot
     chassis.setPose(0, 0, 0);
-    chassis.moveToPoint(0, 10, 1000);
+
+    DR4B(80);
+    pros::delay(500);
+    DR4B(-80);
+    chassis.moveToPoint(0, -5, 1000, {.forwards = false});
+    pros::delay(450);
+    DR4BStop();
+    chassis.moveToPoint(0, 14, 2000, {.minSpeed = 90, .earlyExitRange = 2});
+    chassis.turnToHeading(-89, 1000);
+    chassis.moveToPose(-38.93, 17.8, -91.89, 1500, {.minSpeed = 80});
     chassis.waitUntilDone();
-    chassis.moveToPoint(0, -5, 1000, {.forwards = false}); // moves to toggle
-    chassis.waitUntilDone();
-    // chassis.moveToPose(0, -10, 0, 1000, {.minSpeed = 60}); // moves to starting position
-    // chassis.moveToPose(0, 5, 0, 1000, {.forwards = false, .minSpeed = 60}); // moves to toggle
-
-    // chassis.moveToPose();
-
-
-    // // moves back to toggle for roller using flex wheel mech
-    // chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
-    // chassis.moveToPose(60.757, -2.321, 335.39, 1000);
-    // chassis.moveToPose(63.483, -6.733, 0, 1000, {.forwards = false}); // moves back
-    // // gets toggle ^^^^^^^
-    // chassis.moveToPose(60.176, 2.705, 304.768, 1000);
-    // chassis.moveToPose(47.646, 8.123, 0, 1000);
-    // // lifts up DR4B to score preloads
-    // DR4B(60);
-    // chassis.moveToPose(46.981, 18.713, 358.449, 1000);
-    // toggleClaw();// score preloads/toggle claw
-
-    // chassis.moveToPose(44.728, 8.305, 41.698, 1000, {.forwards = false});// moves back
-    // // move DR4B down to pick up more pins
-    // DR4B(-30);
-    // chassis.moveToPose(56.366, 23.274, 90.777, 1000);
+    pros::delay(300);
+    toggleClaw();
+    pros::delay(500);
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // chassis.moveToPose(-13.78, 17.7, -88.16, 1000, {.forwards = false, .minSpeed = 80, .earlyExitRange = 2});
+    // chassis.turnToHeading(-43.66, 1000);
+    // chassis.moveToPose(-32.59, 46.67, -46.55, 1500, {.minSpeed = 70, .earlyExitRange = 2});
+    // pros::delay(1500);
+    // toggleClaw();
+    // pros::delay(500);
+    // DR4B(200);
+    // pros::delay(400);
     // DR4BStop();
-    // chassis.moveToPose(65.356, 23.171, 89.119, 1000, {.maxSpeed = 50, });// moves slower
-    // // picks up pins
-    // toggleClaw();
-    // chassis.moveToPose(60.473, 23.059, 91.173, 1000, {.forwards = false});// moves back
-    // chassis.moveToPose(50.656, 22.985, 271.853, 1000);
-    // // score pins
-    // toggleClaw();
-    // chassis.moveToPose(58.561, 22.914, 270.113, 1000, {.forwards = false});// moves back
-    // chassis.moveToPose(47.105, -6.802, 113.795, 1000, {.maxSpeed = 90, .minSpeed = 50,});// moves to allign with pick up more pins
-    // chassis.moveToPose(57.865, -23.834, 90.346, 1000);
-    // chassis.moveToPose(67.075, -23.726, 87.604, 1000, {.maxSpeed = 40});// moves slow
-    // chassis.moveToPose(61.021, -23.978, 86.23, 1000, {.forwards = false});// moves back 
-    // chassis.moveToPose(56.812, -24.014, 272.699, 1000);
-    // // lift up DR4B to score pins
-    // DR4B(60);
-    // chassis.moveToPose(51.164, -24.063, 276.657, 1000);
-    // // score pins
+    // pros::delay(200);
+    // chassis.turnToHeading(-161.87, 1000);
+    // chassis.moveToPose(-48.74, 27.706, -167.48, 1000, {.minSpeed = 70, .earlyExitRange = 2});
+    // pros::delay(1000);
+    // DR4B(-200);
+    // pros::delay(200);
+    // DR4BStop();
+    // pros::delay(1000);
     // toggleClaw();
 }
 
-void blueRight() {
-    // alliance = Alliance::BLUE; // optical sensor disabled
-    chassis.setPose(9.712, 62.005, 143.063);
+void blueLeft() {
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    // set the starting position for the robot
+    chassis.setPose(0, 0, 0);
 
-    chassis.moveToPose(5.772, 67.051, 141.808, 1000, {.forwards = false}); // reverse
-    // toggle
-    toggleClaw();
-    chassis.moveToPose(14.788, 55.158, 135.534, 1000);
-    // move DR4B up
-    DR4B(40);
-    chassis.moveToPose(20.144, 49.583, 134.468, 1000, {.maxSpeed = 50}); // move slow
-    chassis.moveToPose(14.65, 55.277, 182.499, 1000, {.forwards = false}); // reverse
-    // move DR4B down
-    DR4B(-50);
-    chassis.moveToPose(12.777, 24.208, 93.799, 1000);
+    DR4B(80);
+    pros::delay(500);
+    DR4B(-80);
+    chassis.moveToPoint(0, -5, 1000, {.forwards = false});
+    pros::delay(450);
     DR4BStop();
-    chassis.moveToPose(20.289, 23.374, 90.975, 1000, {.maxSpeed = 50}); // slow
-    // toggle claw
-    toggleClaw();
-    chassis.moveToPose(6.577, 25.931, 45.035, 1000, {.maxSpeed = 50});// slow
-    // move DR4B up
-    DR4B(50);
-    chassis.moveToPose(20.743, 44.036, 42.701, 1000);
-    // toggle claw
-    toggleClaw();
-    chassis.moveToPose(14.762, 36.52, 38.802, 1000, {.forwards = false}); // reverse
-    // move DR4B down
-    DR4B(-50);
-    chassis.moveToPose(-23.857, 54.275, 0, 1000);
-    DR4BStop();
-    chassis.moveToPose(-23.482, 63.729, 0, 1000, {.maxSpeed = 60}); // slow
-    chassis.moveToPose(-23.449, 58.258, 0, 1000, {.forwards = false}); // reverse
-    // move DR4B up
-    DR4B(50);
-    chassis.moveToPose(-26.737, 49.893, 134.928, 1000);
-    DR4B(-70);
+    chassis.moveToPoint(0, 12, 2000, {.minSpeed = 90, .earlyExitRange = 2});
+    chassis.turnToHeading(95, 1000);
+    chassis.moveToPose(26.406, -2.20, 100.94, 1500, {.minSpeed = 80});
+    chassis.waitUntilDone();
     pros::delay(300);
-    // toggle claw
     toggleClaw();
+    pros::delay(500);
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 }
 
 void skills() {
-    // set whichever color you run skills with
-    // alliance = Alliance::RED; // optical sensor disabled
-    chassis.setPose(-62.271, -2.261, 141.065); // sets pose
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+    // set the starting position for the robot
+    chassis.setPose(0, 0, 0);
 
-    chassis.moveToPose(-65.222, 0.885, 136.589, 1000); // moves to toggle // reverse
-    toggleClaw(); // toggle
-    chassis.moveToPose(-55.178, -11.976, 140.482, 1000);// moves to score preload
-    // move DR4B up to score preload
-    chassis.moveToPose(-49.088, -19.926, 141.982, 1000);
-    // toggle claw
-    chassis.moveToPose(-57.51, -4.495, 180.024, 1000);
-    // move DR4B down to pick up pins
-    chassis.moveToPose(-51.842, -49.807, 211.825, 1000); // nothing
-    chassis.moveToPose(-56.65, -58.291, 272.857, 1000); // nothing
-    chassis.moveToPose(-65.628, -58.321, 269.291, 1000); // move slow
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-49.929, -58.28, 325.927, 1000); // move reverse
-    chassis.moveToPose(-60.721, -34.917, 52.578, 1000);
-    // moves DR4B up to score pins
-    chassis.moveToPose(-48.848, -25.755, 44.701, 1000);
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-60.664, -34.952, 156.044, 1000); // move reverse
-    // moves DR4B down to pick up pins
-    chassis.moveToPose(-50.01, -58.351, 268.979, 1000);
-    chassis.moveToPose(-65.523, -58.389, 269.522, 1000);// move slow
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-49.863, -58.45, 269.827, 1000); // move reverse
-    chassis.moveToPose(-60.527, -34.794, 54.296, 1000);
-    // moves DR4B up to score pins
-    chassis.moveToPose(-48.82, -25.858, 41.362, 1000);
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-60.508, -34.898, 158.199, 1000); // move reverse
-    // moves DR4B down to pick up pins
-    chassis.moveToPose(-49.871, -58.333, 270.01, 1000);
-    chassis.moveToPose(-65.542, -58.347, 270.924, 1000);// move slow
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-49.836, -58.343, 269.462, 1000); // move reverse
-    chassis.moveToPose(-60.5, -34.833, 52.189, 1000);
-    // moves DR4B up to score pins
-    chassis.moveToPose(-48.928, -26.053, 43.815, 1000);
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-60.546, -34.681, 53.848, 1000); // reverse
-    // move DR4B down to pick up pins
-    chassis.moveToPose(-50.011, -58.397, 270.161, 1000);
-    chassis.moveToPose(-65.67, -58.5, 268.423, 1000); // move slow
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-49.915, -58.351, 269.293, 1000); // reverse
-    chassis.moveToPose(-60.372, -34.652, 53.168, 1000);
-    // move DR4B up to score pins
-    chassis.moveToPose(-48.798, -25.904, 43.582, 1000);
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-60.127, -34.655, 0, 1000); // reverse
-    // move DR4B down to pick up pins
-    chassis.moveToPose(-49.776, -58.351, 269.165, 1000); // reverse
-    chassis.moveToPose(-65.746, -58.522, 268.487, 1000); // move slow
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-49.877, -58.43, 269.79, 1000); // reverse
-    chassis.moveToPose(-60.106, -34.407, 52.688, 1000);
-    // move DR4B up to score pins
-    chassis.moveToPose(-48.721, -25.93, 41.824, 1000);
-    toggleClaw(); // toggle claw
-    chassis.moveToPose(-42.608, -35.421, 52.647, 1000); // reverse
-    // move DR4B down to pick up pins
-    chassis.moveToPose(-0.291, -0.473, 0, 1000, {.minSpeed = 200}); // fast
+    DR4B(80);
+    pros::delay(500);
+    DR4B(-80);
+    chassis.moveToPoint(0, -5, 1000, {.forwards = false});
+    pros::delay(450);
+    DR4BStop();
+    chassis.moveToPoint(0, 12, 2000, {.minSpeed = 90, .earlyExitRange = 2});
+    chassis.turnToHeading(95, 1000);
+    chassis.moveToPose(26.406, -2.20, 100.94, 1500, {.minSpeed = 80});
+    chassis.waitUntilDone();
+    pros::delay(300);
+    toggleClaw();
+    pros::delay(500);
+    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+
+    chassis.moveToPoint(0, 14, 2000, {.forwards = false, .minSpeed = 90, .earlyExitRange = 2});
+    chassis.turnToHeading(0, 1000);
+    chassis.moveToPoint(0, 100, 2000);
 }
 
 void autonomous() {
     // redLeft();
     // redRight();
-    blueLeft();
+    // blueLeft();
     // blueRight();
     // skills();
 }
@@ -774,18 +708,18 @@ void opcontrol() {
 
         // ---- L1 / L2: DR4B ----
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
-            DR4B1.move_velocity(200);
-            DR4B2.move_velocity(200);
+            DR4B1.move_velocity(90);
+            DR4B2.move_velocity(90);
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            DR4B1.move_velocity(-200);
-            DR4B2.move_velocity(-200);
+            DR4B1.move_velocity(-90);
+            DR4B2.move_velocity(-90);
         } else {
             DR4B1.move_velocity(0);
             DR4B2.move_velocity(0);
         }
 
         // ---- R1 / R2: intake ----
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
             toggleClaw();
         } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
 
