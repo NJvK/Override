@@ -642,14 +642,14 @@ void blueLeft() {
     pros::delay(450);
     DR4BStop();
     chassis.moveToPoint(0, 12, 2000, {.minSpeed = 90, .earlyExitRange = 2});
-    chassis.turnToHeading(95, 1000);
-    chassis.moveToPose(26.406, -2.20, 100.94, 1500, {.minSpeed = 80});
-    chassis.waitUntilDone();
-    pros::delay(300);
-    toggleClaw();
-    pros::delay(500);
-    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    // chassis.turnToHeading(95, 1000);
+    // chassis.moveToPose(29.156, -2.20, 100.94, 1500, {.minSpeed = 90});
+    // chassis.waitUntilDone();
+    // pros::delay(300);
+    // toggleClaw();
+    // pros::delay(500);
+    // DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    // DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 }
 
 void skills() {
@@ -666,7 +666,7 @@ void skills() {
     DR4BStop();
     chassis.moveToPoint(0, 12, 2000, {.minSpeed = 90, .earlyExitRange = 2});
     chassis.turnToHeading(95, 1000);
-    chassis.moveToPose(26.406, -2.20, 100.94, 1500, {.minSpeed = 80});
+    chassis.moveToPose(29.156, -2.20, 100.94, 1500, {.minSpeed = 90});
     chassis.waitUntilDone();
     pros::delay(300);
     toggleClaw();
@@ -682,7 +682,7 @@ void skills() {
 void autonomous() {
     // redLeft();
     // redRight();
-    // blueLeft();
+    blueLeft();
     // blueRight();
     // skills();
 }
@@ -721,36 +721,37 @@ void opcontrol() {
         // ---- R1 / R2: intake ----
         if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
             toggleClaw();
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
-
-        } else {
-
         }
+        // else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
+
+        // } else {
+
+        // }
 
         // ---- A: claw open / closed ----
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
+        // if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
             
-        }
+        // }
 
-        // ---- B: claw orientation piston ----
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
+        // // ---- B: claw orientation piston ----
+        // if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
             
-        }
+        // }
 
         // ---- UP / DOWN: manual toggle roller ----
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
+        // if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_UP)) {
 
-        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
+        // } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN)) {
 
-        } else {
+        // } else {
 
-        }
+        // }
 
         // OPTICAL SENSOR AUTO-ALIGN DISABLED
         // To bring it back later, uncomment the optical section above
         // and restore the automatic roller calls here.
 
         // delay to save resources
-        pros::delay(10);
+        pros::delay(20);
     }
 }
