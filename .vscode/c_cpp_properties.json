@@ -4,14 +4,15 @@
       "name": "PROS Project",
       "includePath": [
         "${workspaceFolder}/**",
-        "/Users/Natalie/Documents/GitHub/Override/include"
+        "/Users/Natalie/Documents/GitHub/Override/include",
+        "/Users/yardley/Desktop/Everything/VEX/Override/Override/include"
       ],
       "defines": [
         "_DEBUG",
         "UNICODE",
         "_UNICODE"
       ],
-      "compilerPath": "/Users/Natalie/Library/Application Support/Code/User/globalStorage/sigbots.pros/install/pros-toolchain-macos/bin/arm-none-eabi-g++",
+      "compilerPath": "/Users/yardley/Library/Application Support/Code/User/globalStorage/sigbots.pros/install/pros-toolchain-macos/bin/arm-none-eabi-g++",
       "cStandard": "gnu11",
       "cppStandard": "gnu++20",
       "intelliSenseMode": "gcc-arm",
@@ -20,7 +21,7 @@
       ],
       "browse": {
         "path": [
-          "/Users/Natalie/Documents/GitHub/Override"
+          "/Users/yardley/Desktop/Everything/VEX/Override/Override"
         ],
         "limitSymbolsToIncludedHeaders": true,
         "databaseFilename": ""
