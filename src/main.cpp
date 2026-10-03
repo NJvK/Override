@@ -42,10 +42,10 @@ lemlib::TrackingWheel vertical(
 );
 
 // DR4B motor
-pros::MotorGroup DR4B({-7, -8}, pros::MotorGearset::green);
+pros::MotorGroup DR4B({-7, 2}, pros::MotorGearset::green);
 
 // DR4B rotation sensor
-constexpr int DR4B_ROTATION_PORT = 0;
+constexpr int DR4B_ROTATION_PORT = 3;
 pros::Rotation dr4bRotation(DR4B_ROTATION_PORT);
 
 // Other mechanisms
