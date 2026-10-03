@@ -1,6 +1,7 @@
 #include "main.h"
 #include "lemlib/api.hpp"
 #include "lemlib/chassis/chassis.hpp"
+#include "pros/abstract_motor.hpp"
 #include "pros/adi.hpp"
 #include "pros/distance.hpp"
 #include "pros/misc.h"
@@ -41,10 +42,10 @@ lemlib::TrackingWheel vertical(
 );
 
 // DR4B motor
-pros::Motor DR4B(-7);
+pros::MotorGroup DR4B({-7, -8}, pros::MotorGearset::green);
 
 // DR4B rotation sensor
-constexpr int DR4B_ROTATION_PORT = 8;
+constexpr int DR4B_ROTATION_PORT = 0;
 pros::Rotation dr4bRotation(DR4B_ROTATION_PORT);
 
 // Other mechanisms
@@ -148,7 +149,7 @@ constexpr double DR4B_MAX_HOLD_VOLTAGE = 5000.0;
 constexpr double DR4B_HOLD_TOLERANCE = 0.75;
 
 // No PID correction between 0 and 5 degrees
-constexpr double DR4B_BOTTOM_DEADZONE = 5.0;
+constexpr double DR4B_BOTTOM_DEADZONE = 10.0;
 
 // Manual DR4B speeds
 constexpr double DR4B_UP_SPEED = 100.0;
@@ -376,7 +377,7 @@ void opcontrol() {
         } else {
 
             if (clawHolding) {
-                claw.move_velocity(200);
+                claw.move_velocity(60);
             } else {
                 claw.move_velocity(0);
             }
