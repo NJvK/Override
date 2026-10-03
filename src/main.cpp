@@ -5,6 +5,7 @@
 #include "pros/distance.hpp"
 #include "pros/misc.h"
 #include "pros/motors.h"
+#include "pros/motors.hpp"
 #include "pros/rotation.hpp"
 #include "pros/rtos.hpp"
 #include "pros/screen.hpp"
@@ -17,19 +18,14 @@
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
 // Drive motors
-
-pros::MotorGroup leftMotors({-17, -10}, pros::MotorGearset::blue);
-pros::MotorGroup rightMotors({2, 1}, pros::MotorGearset::blue);
-
+pros::MotorGroup leftMotors({-1, -11, -12}, pros::MotorGearset::blue);
+pros::MotorGroup rightMotors({19, 10, 20}, pros::MotorGearset::blue);
 
 // IMU
-
 pros::Imu imu(4);
 
-
 // Odometry rotation sensors
-
-pros::Rotation horizontalEnc(19);
+pros::Rotation horizontalEnc(18);
 pros::Rotation verticalEnc(-16);
 
 lemlib::TrackingWheel horizontal(
@@ -44,35 +40,21 @@ lemlib::TrackingWheel vertical(
     -2.5
 );
 
-
-// DR4B motors
-
-pros::Motor DR4B1(-20);
-pros::Motor DR4B2(13);
-
+// DR4B motor
+pros::Motor DR4B(7);
 
 // DR4B rotation sensor
-
-constexpr int DR4B_ROTATION_PORT = 5;
-
+constexpr int DR4B_ROTATION_PORT = 8;
 pros::Rotation dr4bRotation(DR4B_ROTATION_PORT);
 
-
 // Other mechanisms
-
-pros::MotorGroup Toggle({6, 8});
-
-pros::adi::DigitalOut tClaw('H');
-pros::adi::DigitalOut claw('B');
-
+pros::Motor claw(9);
+bool clawHolding = false;
 
 // Basic constants
-
 const double PI = 3.14159265358979323846;
 
-
 // Joystick deadband
-
 int deadband(int value) {
     if (std::abs(value) < 5) {
         return 0;
@@ -82,7 +64,6 @@ int deadband(int value) {
 }
 
 // Drivetrain
-
 lemlib::Drivetrain drivetrain(
     &leftMotors,
     &rightMotors,
@@ -93,7 +74,6 @@ lemlib::Drivetrain drivetrain(
 );
 
 // Linear PID
-
 lemlib::ControllerSettings linearController(
     5.78,
     0,
@@ -107,7 +87,6 @@ lemlib::ControllerSettings linearController(
 );
 
 // Angular PID
-
 lemlib::ControllerSettings angularController(
     3.7,
     0,
@@ -121,7 +100,6 @@ lemlib::ControllerSettings angularController(
 );
 
 // Odometry sensors
-
 lemlib::OdomSensors sensors = {
     &vertical,
     nullptr,
@@ -131,7 +109,6 @@ lemlib::OdomSensors sensors = {
 };
 
 // Driver curves
-
 lemlib::ExpoDriveCurve throttleCurve(
     3,
     10,
@@ -143,6 +120,7 @@ lemlib::ExpoDriveCurve steerCurve(
     10,
     1.019
 );
+
 // Chassis
 lemlib::Chassis chassis(
     drivetrain,
@@ -154,228 +132,272 @@ lemlib::Chassis chassis(
 );
 
 // DR4B PID
-// Rotation sensor position is converted from centidegrees to degrees.
-double dr4bTarget = 0.0;
-// Start with these values.
-// They will need to be tuned on the actual robot.
-constexpr double DR4B_KP = 250.0;
-constexpr double DR4B_KI = 0.0;
-constexpr double DR4B_KD = 12.0;
-// Maximum motor voltage
-constexpr double DR4B_MAX_VOLTAGE = 12000.0;
-// Software position limits.
-//
-// These are temporary values.
-// Measure your actual fully-down and fully-up positions
-// and change these values.
-constexpr double DR4B_MIN_POSITION = 0.0;
-constexpr double DR4B_MAX_POSITION = 120.0;
-// Manual mode lets your existing autonomous code still use
-// DR4B(80), DR4B(-80), etc.
-bool dr4bManualMode = false;
-double dr4bManualVelocity = 0.0;
-// Get rotation sensor position in normal degrees
 
+// Position where the driver last left the lift
+double dr4bTarget = 0.0;
+
+// True while L1 or L2 is manually controlling the lift
+bool dr4bManualMode = false;
+
+// True when the lift is gently returning to its original bottom position
+bool dr4bReturningToBottom = false;
+
+// Manual velocity
+double dr4bManualVelocity = 0.0;
+
+// PID values
+constexpr double DR4B_KP = 350.0;
+constexpr double DR4B_KD = 10.0;
+
+// Maximum voltage PID can use to push the lift back up
+constexpr double DR4B_MAX_HOLD_VOLTAGE = 5000.0;
+
+// Amount the lift can fall before PID starts correcting
+constexpr double DR4B_HOLD_TOLERANCE = 0.75;
+
+// Original starting position
+constexpr double DR4B_BOTTOM_POSITION = 0.0;
+
+// If the driver releases L2 below this height,
+// the lift automatically finishes returning to 0
+constexpr double DR4B_BOTTOM_RETURN_ZONE = 10.0;
+
+// How close to 0 counts as fully down
+constexpr double DR4B_BOTTOM_TOLERANCE = 0.5;
+
+// Manual lift speeds
+constexpr double DR4B_UP_SPEED = 100.0;
+constexpr double DR4B_DOWN_SPEED = -100.0;
+
+// Slower speed when approaching the bottom
+constexpr double DR4B_SLOW_DOWN_SPEED = -40.0;
+
+// Voltage used to gently finish returning to the bottom
+constexpr double DR4B_BOTTOM_RETURN_VOLTAGE = -2500.0;
+
+// Get rotation sensor position in normal degrees
 double getDR4BPosition() {
     return dr4bRotation.get_position() / 100.0;
 }
 
-// Set PID target
+// Manually move DR4B
+void moveDR4B(double velocity) {
+    dr4bManualVelocity = velocity;
+    dr4bManualMode = true;
+    dr4bReturningToBottom = false;
+}
 
-void setDR4BTarget(double target) {
-    if (target < DR4B_MIN_POSITION) {
-        target = DR4B_MIN_POSITION;
-    }
+// Stop manual movement
+void holdDR4B() {
+    double position = getDR4BPosition();
 
-    if (target > DR4B_MAX_POSITION) {target = DR4B_MAX_POSITION;}
-    dr4bTarget = target;
+    dr4bManualVelocity = 0;
     dr4bManualMode = false;
+
+    // If the lift is close to the original bottom,
+    // finish returning all the way to 0
+    if (position <= DR4B_BOTTOM_RETURN_ZONE) {
+        dr4bTarget = DR4B_BOTTOM_POSITION;
+        dr4bReturningToBottom = true;
+    } else {
+        // Anywhere else, hold exactly where the driver left it
+        dr4bTarget = position;
+        dr4bReturningToBottom = false;
+    }
 }
 
 // DR4B PID loop
-
 void runDR4BPID() {
     double previousError = 0.0;
-    double integral = 0.0;
     constexpr double DT = 0.020;
 
     while (true) {
         double position = getDR4BPosition();
 
-        // Existing autonomous functions can temporarily
-        // control the lift using velocity.
-
+        // Manual control gets priority
         if (dr4bManualMode) {
-            DR4B1.move_velocity(dr4bManualVelocity);
-            DR4B2.move_velocity(dr4bManualVelocity);
-            // Keep the PID target following the actual lift
-            // while manually moving it.
+
+            // Raising
+            if (dr4bManualVelocity > 0) {
+                DR4B.move_velocity(dr4bManualVelocity);
+            }
+
+            // Lowering
+            else if (dr4bManualVelocity < 0) {
+
+                // Stop once it reaches the original starting position
+                if (position <= DR4B_BOTTOM_POSITION + DR4B_BOTTOM_TOLERANCE) {
+                    DR4B.move_voltage(0);
+                }
+
+                // Slow down when approaching the original bottom
+                else if (position <= DR4B_BOTTOM_RETURN_ZONE) {
+                    DR4B.move_velocity(DR4B_SLOW_DOWN_SPEED);
+                }
+
+                // Normal manual lowering
+                else {
+                    DR4B.move_velocity(dr4bManualVelocity);
+                }
+            }
+
+            // Keep target following the lift while manually moving
             dr4bTarget = position;
             previousError = 0.0;
-            integral = 0.0;
+
             pros::delay(20);
             continue;
         }
 
-        double error = dr4bTarget - position;
+        // Finish returning to the original bottom position
+        if (dr4bReturningToBottom) {
 
-        // Only build integral when reasonably close.
+            if (position > DR4B_BOTTOM_POSITION + DR4B_BOTTOM_TOLERANCE) {
 
-        if (std::fabs(error) < 10.0) {
-            integral += error * DT;
-        } else {
-            integral = 0.0;
+                // Gently continue downward toward 0
+                DR4B.move_voltage(
+                    static_cast<int>(DR4B_BOTTOM_RETURN_VOLTAGE)
+                );
+
+            } else {
+
+                // Original starting position reached
+                DR4B.move_voltage(0);
+
+                dr4bTarget = DR4B_BOTTOM_POSITION;
+                dr4bReturningToBottom = false;
+            }
+
+            previousError = 0.0;
+
+            pros::delay(20);
+            continue;
         }
 
-        // Integral protection
+        // Positive error means the lift has fallen below
+        // where the driver left it
+        double error = dr4bTarget - position;
 
-        if (integral > 20.0) {integral = 20.0;}
+        // Only use PID if the lift has fallen
+        if (error > DR4B_HOLD_TOLERANCE) {
 
-        if (integral < -20.0) {integral = -20.0;}
+            double derivative =
+                (error - previousError) / DT;
 
-        double derivative = (error - previousError) / DT;
-        double output = DR4B_KP * error + DR4B_KI * integral + DR4B_KD * derivative;
-        // Limit voltage
+            double output =
+                DR4B_KP * error +
+                DR4B_KD * derivative;
 
-        if (output > DR4B_MAX_VOLTAGE) {output = DR4B_MAX_VOLTAGE;}
-        if (output < -DR4B_MAX_VOLTAGE) {output = -DR4B_MAX_VOLTAGE;}
+            // PID is only allowed to push upward
+            if (output < 0) {
+                output = 0;
+            }
 
-        DR4B1.move_voltage(static_cast<int>(output));
-        DR4B2.move_voltage(static_cast<int>(output));
+            // Limit correction power
+            if (output > DR4B_MAX_HOLD_VOLTAGE) {
+                output = DR4B_MAX_HOLD_VOLTAGE;
+            }
+
+            DR4B.move_voltage(
+                static_cast<int>(output)
+            );
+
+        } else {
+
+            // At the correct height
+            DR4B.move_voltage(0);
+        }
+
         previousError = error;
+
         pros::delay(20);
     }
 }
 
-// Existing autonomous compatibility functions
-
-void DR4B(float speed) {
-    dr4bManualVelocity = speed;
-    dr4bManualMode = true;
-}
-
-
-void DR4BStop() {
-    // Switch back to PID and hold wherever the lift currently is.
-    dr4bTarget = getDR4BPosition();
-    dr4bManualVelocity = 0;
-    dr4bManualMode = false;
-}
-
-// Optional wait function for autonomous
-
-void waitForDR4B(double tolerance = 2.0,int timeout = 1500) {
-    std::uint32_t start = pros::millis();
-
-    while (std::fabs(dr4bTarget - getDR4BPosition()) > tolerance) {
-        if (pros::millis() - start >static_cast<std::uint32_t>(timeout)) {
-            break;
-        }
-        pros::delay(10);
-    }
-}
-
-// Claw
-bool clawOn = false;
-bool tclawOn = true;
-
-void toggleClaw() {
-    clawOn = !clawOn;
-    claw.set_value(clawOn);
-}
-
-
-void toggleClawO() {
-    tclawOn = !tclawOn;
-    tClaw.set_value(tclawOn);
-}
-
-
 // Initialize
-
 void initialize() {
     pros::lcd::initialize();
     chassis.calibrate();
 
-    // Zero normal motor encoders
+    // DR4B must physically be at its true lowest position
+    // when the robot is turned on
+    DR4B.tare_position();
 
-    DR4B1.tare_position();
-    DR4B2.tare_position();
-
-    // IMPORTANT:
-    //
-    // The DR4B should physically be in its fully-down
-    // starting position when the robot turns on.
-
+    // This makes the original starting position permanently 0 degrees
     dr4bRotation.reset_position();
-    dr4bTarget = 0.0;
-    DR4B1.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    DR4B2.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+
+    dr4bTarget = DR4B_BOTTOM_POSITION;
+    dr4bManualMode = false;
+    dr4bReturningToBottom = false;
+
+    // PID handles holding instead of motor brake hold
+    DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
     // Start DR4B PID
-
-    static pros::Task dr4bPIDTask([]() {runDR4BPID();});
-
-    // Starting pneumatic states
-
-    tclawOn = true;
-    tClaw.set_value(true);
-    claw.set_value(clawOn);
+    static pros::Task dr4bPIDTask([]() {
+        runDR4BPID();
+    });
 
     // Brain screen
-
     static pros::Task screenTask([]() {
 
         while (true) {
+
             pros::lcd::print(0, "X: %.2f", chassis.getPose().x);
             pros::lcd::print(1, "Y: %.2f", chassis.getPose().y);
             pros::lcd::print(2, "Theta: %.2f", chassis.getPose().theta);
-            pros::lcd::print(3, "Lift: %.2f", getDR4BPosition());
-            pros::lcd::print(4, "Target: %.2f", dr4bTarget);
 
-            lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
+            pros::lcd::print(
+                3,
+                "Lift: %.2f",
+                getDR4BPosition()
+            );
+
+            pros::lcd::print(
+                4,
+                "Hold: %.2f",
+                dr4bTarget
+            );
+
+            pros::lcd::print(
+                5,
+                "Bottom: %s",
+                dr4bReturningToBottom ? "RETURN" : "OFF"
+            );
+
+            lemlib::telemetrySink()->info(
+                "Chassis pose: {}",
+                chassis.getPose()
+            );
+
             pros::delay(50);
         }
-
     });
 }
 
-
 // Disabled
-
 void disabled() {
 
 }
 
-
 // Competition initialize
-
 void competition_initialize() {
 
 }
 
-
 // Pure pursuit asset
-
 ASSET(example_txt);
 
-
 // Exit condition
-
-void exit_condition(
-    lemlib::Pose target,
-    double exitDist) {
+void exit_condition(lemlib::Pose target, double exitDist) {
     chassis.waitUntil(fabs(chassis.getPose().distance(target)) - exitDist);
     chassis.cancelMotion();
 }
 
-
 // Red left autonomous
-
 void redLeft() {
 
 }
-
 
 // Red right autonomous
 void redRight() {
@@ -383,107 +405,21 @@ void redRight() {
 }
 
 // Blue right autonomous
-
 void blueRight() {
 
-    DR4B1.set_brake_mode(
-        pros::E_MOTOR_BRAKE_COAST
-    );
-
-    DR4B2.set_brake_mode(
-        pros::E_MOTOR_BRAKE_COAST
-    );
-
-
-    chassis.setPose(0, 0, 0);
-
-
-    DR4B(80);
-
-    pros::delay(500);
-
-
-    DR4B(-80);
-
-
-    chassis.moveToPoint(
-        0,
-        -5,
-        1000,
-        {.forwards = false}
-    );
-
-
-    pros::delay(450);
-
-
-    DR4BStop();
-
-
-    chassis.moveToPoint(
-        0,
-        14,
-        2000,
-        {
-            .minSpeed = 90,
-            .earlyExitRange = 2
-        }
-    );
-
-
-    chassis.turnToHeading(
-        -89,
-        1000
-    );
-
-
-    chassis.moveToPose(
-        -38.93,
-        17.8,
-        -91.89,
-        1500,
-        {.minSpeed = 80}
-    );
-
-
-    chassis.waitUntilDone();
-
-
-    pros::delay(300);
-
-
-    toggleClaw();
-
-
-    pros::delay(500);
-
-
-    DR4B1.set_brake_mode(
-        pros::E_MOTOR_BRAKE_HOLD
-    );
-
-    DR4B2.set_brake_mode(
-        pros::E_MOTOR_BRAKE_HOLD
-    );
 }
 
-
 // Blue left autonomous
-
 void blueLeft() {
 
 }
 
-
 // Skills autonomous
-
 void skills() {
 
 }
 
-
 // Autonomous selector
-
 void autonomous() {
     // redLeft();
     // redRight();
@@ -492,40 +428,69 @@ void autonomous() {
     // skills();
 }
 
-
 // Driver control
-
 void opcontrol() {
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);
-    // Start driver control holding the lift
-    // wherever it currently is.
+    DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
-    setDR4BTarget(getDR4BPosition());
+    // Hold wherever the lift is when driver control starts
+    dr4bTarget = getDR4BPosition();
+    dr4bManualMode = false;
+    dr4bReturningToBottom = false;
 
     while (true) {
-        int leftY = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
-        int rightX = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X));
+
+        // Drive
+        int leftY = deadband(
+            controller.get_analog(
+                pros::E_CONTROLLER_ANALOG_LEFT_Y
+            )
+        );
+
+        int rightX = deadband(
+            controller.get_analog(
+                pros::E_CONTROLLER_ANALOG_RIGHT_X
+            )
+        );
+
         chassis.arcade(leftY, 0.9 * rightX);
 
+        // DR4B manual control
 
-        // DR4B PID target control
-        //
-        // Holding L1 raises the desired lift position.
-        // Holding L2 lowers the desired lift position.
-        //
-        // Releasing the button leaves the target where it is,
-        // so the PID holds the lift there.
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
 
-        if (
-            controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) 
-        {
-            setDR4BTarget(dr4bTarget + 1.5);
-        }else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
-            setDR4BTarget(dr4bTarget - 1.5);
+            // Manually raise DR4B
+            moveDR4B(DR4B_UP_SPEED);
+
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
+
+            // Manually lower DR4B
+            moveDR4B(DR4B_DOWN_SPEED);
+
+        } else {
+
+            // When L1/L2 are released
+            if (dr4bManualMode) {
+                holdDR4B();
+            }
         }
-        // R1 toggles claw
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_R1)) {
-            toggleClaw();
+
+        // Claw
+        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
+            // Spin forward and keep spinning after R1 is released
+            clawHolding = true;
+            claw.move_velocity(200);
+        } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2)) {
+            // Spin backward and cancel the holding state
+            clawHolding = false;
+            claw.move_velocity(-200);
+        } else {
+            // Keep spinning forward only if R1 was the last command
+            if (clawHolding) {
+                claw.move_velocity(200);
+            } else {
+                claw.move_velocity(0);
+            }
         }
 
         pros::delay(20);
