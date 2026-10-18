@@ -882,11 +882,6 @@ void blueLeft() {
 
 }
 
-// Skills autonomous
-void skills() {
-
-}
-
 // =====================================================================
 //                 TWO-PIN + TOGGLE AUTONOMOUS TUNING
 // =====================================================================
@@ -953,15 +948,16 @@ constexpr double AUTO_TURN_ARRIVE_TOLERANCE_DEG = 8.0;   // Increase slightly if
 constexpr double AUTO_DRIVE_ARRIVE_TOLERANCE_IN = 3.0;   // Increase if odometry consistently stops short of its target
 
 uint32_t twoPinAutoStartMs = 0;
+uint32_t autoBudgetMs = TWO_PIN_AUTO_BUDGET_MS;   // 15 s for a match auton, 60 s for skills (set in autonomous())
 
 bool twoPinAutoTimeExpired() {
-    return (pros::millis() - twoPinAutoStartMs) >= TWO_PIN_AUTO_BUDGET_MS;
+    return (pros::millis() - twoPinAutoStartMs) >= autoBudgetMs;
 }
 
 int twoPinAutoBoundedTimeout(int requestedMs) {
     uint32_t elapsed = pros::millis() - twoPinAutoStartMs;
-    if (elapsed >= TWO_PIN_AUTO_BUDGET_MS) return 0;
-    uint32_t remaining = TWO_PIN_AUTO_BUDGET_MS - elapsed;
+    if (elapsed >= autoBudgetMs) return 0;
+    uint32_t remaining = autoBudgetMs - elapsed;
     return std::min(requestedMs, static_cast<int>(remaining));
 }
 
@@ -1015,14 +1011,15 @@ bool twoPinAutoTurnRelative(double deltaDeg) {
 
     lemlib::Pose pose = chassis.getPose();
     double targetHeading = std::fmod(pose.theta + deltaDeg + 360.0, 360.0);
-    chassis.turnToHeading(targetHeading, timeoutMs);
+    chassis.turnToHeading(targetHeading, timeoutMs, {}, false);  // false = wait until the turn is done
     if (twoPinAutoTimeExpired()) return false;
     // If this is false, raise AUTO_TURN_TIMEOUT_MS or retune LemLib's angular PID.
     double headingError = std::fabs(std::remainder(targetHeading - chassis.getPose().theta, 360.0));
     return headingError <= AUTO_TURN_ARRIVE_TOLERANCE_DEG;
 }
 
-bool twoPinAutoDriveDistance(double distanceIn, bool forwards, int requestedTimeoutMs = AUTO_DRIVE_TIMEOUT_MS) {
+bool twoPinAutoDriveDistance(double distanceIn, bool forwards, int requestedTimeoutMs = AUTO_DRIVE_TIMEOUT_MS,
+                             float maxSpeed = 127) {
     if (twoPinAutoTimeExpired()) return false;
     int timeoutMs = twoPinAutoBoundedTimeout(requestedTimeoutMs);
     if (timeoutMs <= 0) return false;
@@ -1036,7 +1033,9 @@ bool twoPinAutoDriveDistance(double distanceIn, bool forwards, int requestedTime
     double targetX = pose.x + signedDistance * std::sin(headingRad);
     double targetY = pose.y + signedDistance * std::cos(headingRad);
 
-    chassis.moveToPoint(targetX, targetY, timeoutMs, {}, forwards);
+    // In this LemLib version the 5th argument is "async", so direction goes in the params
+    // and async is false so this waits until the move is done.
+    chassis.moveToPoint(targetX, targetY, timeoutMs, {.forwards = forwards, .maxSpeed = maxSpeed}, false);
     if (twoPinAutoTimeExpired()) return false;
     // If this is false, raise AUTO_DRIVE_TIMEOUT_MS or tune LemLib's linear PID.
     lemlib::Pose after = chassis.getPose();
@@ -1145,13 +1144,136 @@ bool runTwoPinToggleAutoRoute() {
     return !twoPinAutoTimeExpired();
 }
 
+// =====================================================================
+//          SKILLS AUTONOMOUS: 5 PINS FROM THE MATCH LOADER (RED LEFT)
+// =====================================================================
+// Which routine autonomous() runs. true = skills (60 s), false = the two-pin match auton (15 s).
+// SET THIS BACK TO false BEFORE A MATCH.
+constexpr bool AUTO_RUN_SKILLS = true;
+constexpr uint32_t SKILLS_AUTO_BUDGET_MS = 60000;
+
+// The robot runs 5 trips: match loader -> alliance goal, stacking one pin each trip at
+// alliance heights 1, 2, 3, 4, 5 (ALLIANCE_HEIGHTS at the top of this file).
+//
+// The two spots below are FIELD points in the odometry frame, where the starting
+// spot (red left tile) is X = 0, Y = 0. +Y = the way the robot faces at the start,
+// +X = to its right. Heading is in degrees, 0 = the starting direction, + = clockwise.
+//
+// HOW TO MEASURE THEM (no math needed):
+//  1. Place the robot on its exact starting spot facing SKILLS_START_HEADING_DEG, turn it on.
+//  2. Push the robot by hand to the spot where it should be lined up in front of the
+//     match loader, square to it, with the open claw just short of touching the pin.
+//  3. Read X / Y / Th from line 0 of the brain screen and type them in below.
+//  4. Do the same for the spot lined up in front of the alliance goal, a few inches back.
+// The values below are PLACEHOLDERS, not real field positions.
+constexpr double SKILLS_START_X = 0.0;
+constexpr double SKILLS_START_Y = 0.0;
+constexpr double SKILLS_START_HEADING_DEG = 0.0;
+
+constexpr double SKILLS_LOADER_X = -48.0;          // PLACEHOLDER: lined up in front of the match loader
+constexpr double SKILLS_LOADER_Y = 0.0;            // PLACEHOLDER
+constexpr double SKILLS_LOADER_HEADING_DEG = 180.0; // PLACEHOLDER: facing the match loader
+
+constexpr double SKILLS_GOAL_X = 24.0;              // PLACEHOLDER: lined up in front of the alliance goal
+constexpr double SKILLS_GOAL_Y = 24.0;             // PLACEHOLDER
+constexpr double SKILLS_GOAL_HEADING_DEG = 0.0;     // PLACEHOLDER: facing the alliance goal
+
+// --- At the match loader ---
+// The claw grabs at full speed while the robot creeps gently into the loader (the loader
+// holds the pin still, like pickup 1 against the wall in the two-pin auton).
+constexpr int SKILLS_LOADER_CREEP_SPEED = 28;       // -127..127, positive = forward
+constexpr int SKILLS_LOADER_CREEP_MS = 900;         // how long it creeps while the claw closes
+constexpr double SKILLS_LOADER_BACKOFF_IN = 6.0;    // back away from the loader after grabbing
+
+// --- At the alliance goal ---
+// The lift only goes this high while driving across the field (a tall lift can tip the robot).
+// It finishes rising once the robot is lined up in front of the goal.
+constexpr double SKILLS_TRAVEL_LIFT_MAX_DEG = 300.0;
+constexpr double SKILLS_GOAL_APPROACH_IN = 5.0;     // drive in from the lined-up spot to the scoring spot
+constexpr float SKILLS_GOAL_APPROACH_SPEED = 50;    // slow so the stack isn't bumped (0-127)
+constexpr int SKILLS_RELEASE_MS = 250;              // claw opens this long before backing away
+constexpr double SKILLS_GOAL_BACKOFF_IN = 6.0;      // back away from the stack after each pin
+
+// --- Timeouts / tolerances for the long drives between loader and goal ---
+constexpr int SKILLS_TRAVEL_TIMEOUT_MS = 2500;
+constexpr double SKILLS_TRAVEL_ARRIVE_TOLERANCE_IN = 3.0;
+constexpr float SKILLS_TRAVEL_LEAD = 0.4;           // moveToPose curviness (0-1, lower = straighter)
+// =====================================================================
+
+// Drives to a field point and ends facing the given heading. Waits until done.
+bool skillsMoveToPose(double x, double y, double headingDeg) {
+    if (twoPinAutoTimeExpired()) return false;
+    int timeoutMs = twoPinAutoBoundedTimeout(SKILLS_TRAVEL_TIMEOUT_MS);
+    if (timeoutMs <= 0) return false;
+
+    chassis.moveToPose(x, y, headingDeg, timeoutMs, {.lead = SKILLS_TRAVEL_LEAD}, false);
+    if (twoPinAutoTimeExpired()) return false;
+
+    // If this is false, raise SKILLS_TRAVEL_TIMEOUT_MS or check the measured X / Y.
+    lemlib::Pose after = chassis.getPose();
+    return std::hypot(x - after.x, y - after.y) <= SKILLS_TRAVEL_ARRIVE_TOLERANCE_IN;
+}
+
+// One trip: grab a pin at the match loader and stack it at alliance height stackNumber (1-5).
+bool skillsLoaderToGoalCycle(int stackNumber) {
+    // Drive to the loader with the lift down and the claw open
+    twoPinAutoSetLiftTarget(0.0);
+    claw.move_velocity(AUTO_CLAW_OPEN_RPM);
+    if (!skillsMoveToPose(SKILLS_LOADER_X, SKILLS_LOADER_Y, SKILLS_LOADER_HEADING_DEG)) return false;
+
+    // Grab: claw full speed while creeping into the loader, then gentle hold
+    claw.move_velocity(AUTO_CLAW_GRAB_RPM);
+    chassis.arcade(SKILLS_LOADER_CREEP_SPEED, 0);
+    bool creepFinished = twoPinAutoDelay(SKILLS_LOADER_CREEP_MS);
+    chassis.arcade(0, 0);
+    if (!creepFinished) return false;
+    claw.move_velocity(AUTO_CLAW_HOLD_RPM);
+
+    // Lift the pin off the loader, then back away
+    twoPinAutoSetLiftTarget(PIN_LIFT_HEIGHT);
+    if (!twoPinAutoWaitForLift(PIN_LIFT_HEIGHT, AUTO_LIFT_TIMEOUT_MS)) return false;
+    if (!twoPinAutoDriveDistance(SKILLS_LOADER_BACKOFF_IN, false)) return false;
+
+    // Start raising while crossing the field (capped so the robot doesn't drive top-heavy)
+    const double stackHeight = getStackHeight(GOAL_ALLIANCE, stackNumber);
+    twoPinAutoSetLiftTarget(std::min(stackHeight, SKILLS_TRAVEL_LIFT_MAX_DEG));
+    if (!skillsMoveToPose(SKILLS_GOAL_X, SKILLS_GOAL_Y, SKILLS_GOAL_HEADING_DEG)) return false;
+
+    // Finish raising, then ease in over the stack
+    twoPinAutoSetLiftTarget(stackHeight);
+    if (!twoPinAutoWaitForLift(stackHeight, AUTO_LIFT_TIMEOUT_MS)) return false;
+    if (!twoPinAutoDriveDistance(SKILLS_GOAL_APPROACH_IN, true, AUTO_DRIVE_TIMEOUT_MS,
+                                 SKILLS_GOAL_APPROACH_SPEED)) return false;
+
+    // Release, wait for the pin to settle, back off, and only then lower the lift
+    claw.move_velocity(AUTO_CLAW_OPEN_RPM);
+    if (!twoPinAutoDelay(SKILLS_RELEASE_MS)) return false;
+    bool backedOff = twoPinAutoDriveDistance(SKILLS_GOAL_BACKOFF_IN, false);
+    claw.move_velocity(0);
+    twoPinAutoSetLiftTarget(0.0);
+    return backedOff;
+}
+
+// Skills autonomous: 5 pins from the match loader stacked on the alliance goal
+bool skills() {
+    for (int stackNumber = 1; stackNumber <= NUM_STACK_HEIGHTS; stackNumber++) {
+        if (!skillsLoaderToGoalCycle(stackNumber)) return false;
+    }
+    return !twoPinAutoTimeExpired();
+}
+
 // Autonomous selector
 void autonomous() {
     twoPinAutoStartMs = pros::millis();
+    autoBudgetMs = AUTO_RUN_SKILLS ? SKILLS_AUTO_BUDGET_MS : TWO_PIN_AUTO_BUDGET_MS;
 
     // This resets the odometry origin and tells LemLib the robot's starting angle.
-    // Tune AUTO_START_HEADING_DEG to match the direction the robot actually faces.
-    chassis.setPose(AUTO_START_X, AUTO_START_Y, AUTO_START_HEADING_DEG);
+    // Tune AUTO_START_HEADING_DEG / SKILLS_START_HEADING_DEG to match the direction the robot actually faces.
+    if (AUTO_RUN_SKILLS) {
+        chassis.setPose(SKILLS_START_X, SKILLS_START_Y, SKILLS_START_HEADING_DEG);
+    } else {
+        chassis.setPose(AUTO_START_X, AUTO_START_Y, AUTO_START_HEADING_DEG);
+    }
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_BRAKE);
     DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
@@ -1166,7 +1288,11 @@ void autonomous() {
     dr4bTargetForced = false;
     dr4bTarget = getDR4BPosition();
 
-    runTwoPinToggleAutoRoute();
+    if (AUTO_RUN_SKILLS) {
+        skills();
+    } else {
+        runTwoPinToggleAutoRoute();
+    }
 
     // Always stop open-loop mechanisms/drivetrain if the route finishes or reaches
     // the 15 s budget. Capture the lift's present position so it doesn't chase a

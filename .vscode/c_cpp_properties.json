@@ -5,14 +5,14 @@
       "includePath": [
         "${workspaceFolder}/**",
         "/Users/Natalie/Documents/GitHub/Override/include",
-        "c:\\Users\\Risha\\Downloads\\robocode2\\Override\\include"
+        "c:\\Users\\Natalie\\Documents\\GitHub\\Override\\include"
       ],
       "defines": [
         "_DEBUG",
         "UNICODE",
         "_UNICODE"
       ],
-      "compilerPath": "c:\\Users\\Risha\\AppData\\Roaming\\Code\\User\\globalStorage\\sigbots.pros\\install\\pros-toolchain-windows\\usr\\bin\\arm-none-eabi-g++",
+      "compilerPath": "/Users/Natalie/Library/Application Support/Code/User/globalStorage/sigbots.pros/install/pros-toolchain-macos/bin/arm-none-eabi-g++",
       "cStandard": "gnu11",
       "cppStandard": "gnu++20",
       "intelliSenseMode": "gcc-arm",
@@ -21,7 +21,7 @@
       ],
       "browse": {
         "path": [
-          "c:\\Users\\Risha\\Downloads\\robocode2\\Override"
+          "/Users/Natalie/Documents/GitHub/Override"
         ],
         "limitSymbolsToIncludedHeaders": true,
         "databaseFilename": ""
