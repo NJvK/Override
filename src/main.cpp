@@ -787,8 +787,9 @@ void autonomous() {
     toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
     dr4bSlewDown = DR4B_AUTON_SLEW_DOWN;   // lift lowers a little slower in auton
+    
     // twoPinAlliance(); // quals left auto
-    // manyPinAlliance(); // skills auto
+    manyPinAlliance(); // skills auto
     // mirrorAlliance(); // autonmirror.cpp: 3-pin route (right wall, or top wall if AUTON_START_ON_TOP = true there)
 }
 

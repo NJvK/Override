@@ -22,16 +22,16 @@ bin/main.cpp.o: src/main.cpp include/robot.hpp include/main.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/lv_draw_buf.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_types.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_area.h \
- include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_types.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_math.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_assert.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_log.h \
- include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/lv_mem.h \
- include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/../lv_conf_internal.h \
- include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/lv_string.h \
- include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/../misc/lv_types.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/stdlib/lv_mem.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/stdlib/lv_string.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_palette.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color.h \
  include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color_op.h \
@@ -41,15 +41,15 @@ bin/main.cpp.o: src/main.cpp include/robot.hpp include/main.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/lv_area.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_entry.h \
- include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/lv_os.h \
- include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/../lv_conf_internal.h \
- include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/../misc/lv_types.h \
- include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/lv_os_none.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/osal/lv_os.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/osal/lv_os_none.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/../lv_types.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_private.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_lru_rb.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_image_cache.h \
- include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
  include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_image_header_cache.h \
  include/liblvgl/core/../draw/../misc/lv_color.h \
  include/liblvgl/core/../draw/../misc/lv_area.h \
@@ -71,11 +71,11 @@ bin/main.cpp.o: src/main.cpp include/robot.hpp include/main.h \
  include/liblvgl/core/../draw/../misc/../layouts/../lv_conf_internal.h \
  include/liblvgl/core/../draw/../misc/../layouts/../misc/lv_types.h \
  include/liblvgl/core/../draw/../misc/../layouts/flex/lv_flex.h \
- include/liblvgl/core/../draw/../misc/../layouts/flex/../../lv_conf_internal.h \
- include/liblvgl/core/../draw/../misc/../layouts/flex/../../misc/lv_area.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h \
  include/liblvgl/core/../draw/../misc/../layouts/grid/lv_grid.h \
- include/liblvgl/core/../draw/../misc/../layouts/grid/../../lv_conf_internal.h \
- include/liblvgl/core/../draw/../misc/../layouts/grid/../../misc/lv_area.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h \
  include/liblvgl/core/../draw/../misc/lv_style_gen.h \
  include/liblvgl/core/../draw/../misc/lv_text.h \
  include/liblvgl/core/../draw/../misc/lv_profiler.h \
@@ -142,41 +142,39 @@ bin/main.cpp.o: src/main.cpp include/robot.hpp include/main.h \
  include/liblvgl/core/../others/sysmon/lv_sysmon.h \
  include/liblvgl/core/../others/sysmon/../../misc/lv_timer.h \
  include/liblvgl/core/../others/sysmon/../../others/observer/lv_observer.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../lv_conf_internal.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_types.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_style.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_area.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_color.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_assert.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_tree.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_anim.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../display/lv_display.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_pos.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_scroll.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_style.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_bidi.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_style_gen.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../core/lv_obj_style.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_draw.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_rect.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_label.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_image.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_line.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_arc.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_class.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_property.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_event.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_event.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/lv_indev.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/lv_group.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../lv_conf_internal.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../misc/lv_types.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../misc/lv_ll.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_area.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_timer.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_event.h \
- include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_group.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_style.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_color.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_assert.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_tree.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_anim.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/display/lv_display.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_pos.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_scroll.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_bidi.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style_gen.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_draw.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_rect.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_label.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_image.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_line.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_arc.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_class.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_property.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_event.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_event.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/indev/lv_indev.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_group.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_ll.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_timer.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_event.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_group.h \
  include/liblvgl/core/../stdlib/builtin/lv_tlsf.h \
  include/liblvgl/core/../stdlib/builtin/../../lv_conf_internal.h \
  include/liblvgl/core/../stdlib/builtin/../../osal/lv_os.h \
@@ -247,12 +245,12 @@ bin/main.cpp.o: src/main.cpp include/robot.hpp include/main.h \
  include/liblvgl/libs/qrcode/lv_qrcode_private.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/lv_canvas_private.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image_private.h \
- include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../core/lv_obj_private.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_private.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image.h \
- include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../lv_conf_internal.h \
- include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../core/lv_obj.h \
- include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../misc/lv_fs.h \
- include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../draw/lv_draw.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_fs.h \
+ c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/lv_canvas.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/../../lv_conf_internal.h \
  include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image.h \
@@ -714,16 +712,16 @@ include/liblvgl/core/../draw/../misc/../font/lv_symbol_def.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/lv_draw_buf.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_types.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_area.h:
-include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_types.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_math.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_assert.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_log.h:
-include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/lv_mem.h:
-include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/../lv_conf_internal.h:
-include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/lv_string.h:
-include/liblvgl/core/../draw/../misc/../font/../draw/../misc/../stdlib/../misc/lv_types.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/stdlib/lv_mem.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/stdlib/lv_string.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_palette.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color.h:
 include/liblvgl/core/../draw/../misc/../font/../draw/../misc/lv_color_op.h:
@@ -733,15 +731,15 @@ include/liblvgl/core/../draw/../misc/../font/../draw/../lv_conf_internal.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/lv_area.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_entry.h:
-include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/lv_os.h:
-include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/../lv_conf_internal.h:
-include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/../misc/lv_types.h:
-include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../osal/lv_os_none.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/osal/lv_os.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/osal/lv_os_none.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/../lv_types.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_private.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_cache_lru_rb.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_image_cache.h:
-include/liblvgl/core/../draw/../misc/../font/../misc/cache/../../lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
 include/liblvgl/core/../draw/../misc/../font/../misc/cache/lv_image_header_cache.h:
 include/liblvgl/core/../draw/../misc/lv_color.h:
 include/liblvgl/core/../draw/../misc/lv_area.h:
@@ -763,11 +761,11 @@ include/liblvgl/core/../draw/../misc/../layouts/lv_layout.h:
 include/liblvgl/core/../draw/../misc/../layouts/../lv_conf_internal.h:
 include/liblvgl/core/../draw/../misc/../layouts/../misc/lv_types.h:
 include/liblvgl/core/../draw/../misc/../layouts/flex/lv_flex.h:
-include/liblvgl/core/../draw/../misc/../layouts/flex/../../lv_conf_internal.h:
-include/liblvgl/core/../draw/../misc/../layouts/flex/../../misc/lv_area.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h:
 include/liblvgl/core/../draw/../misc/../layouts/grid/lv_grid.h:
-include/liblvgl/core/../draw/../misc/../layouts/grid/../../lv_conf_internal.h:
-include/liblvgl/core/../draw/../misc/../layouts/grid/../../misc/lv_area.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h:
 include/liblvgl/core/../draw/../misc/lv_style_gen.h:
 include/liblvgl/core/../draw/../misc/lv_text.h:
 include/liblvgl/core/../draw/../misc/lv_profiler.h:
@@ -834,41 +832,39 @@ include/liblvgl/core/../osal/lv_os.h:
 include/liblvgl/core/../others/sysmon/lv_sysmon.h:
 include/liblvgl/core/../others/sysmon/../../misc/lv_timer.h:
 include/liblvgl/core/../others/sysmon/../../others/observer/lv_observer.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../lv_conf_internal.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_types.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_style.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_area.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_color.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_assert.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_tree.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_anim.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../display/lv_display.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_pos.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_scroll.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_style.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_bidi.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_style_gen.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../core/lv_obj_style.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_draw.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_rect.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_label.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_image.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_line.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../draw/lv_draw_arc.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_class.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_property.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_obj_event.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../misc/lv_event.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/lv_indev.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/lv_group.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../lv_conf_internal.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../misc/lv_types.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../core/../misc/lv_ll.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_area.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_timer.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/../indev/../misc/lv_event.h:
-include/liblvgl/core/../others/sysmon/../../others/observer/../../core/lv_group.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_types.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_style.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_color.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_assert.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_tree.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_anim.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/display/lv_display.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_pos.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_scroll.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_bidi.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style_gen.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_style.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_draw.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_rect.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_label.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_image.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_line.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw_arc.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_class.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_property.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_event.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_event.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/indev/lv_indev.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_group.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_ll.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_area.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_timer.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_event.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_group.h:
 include/liblvgl/core/../stdlib/builtin/lv_tlsf.h:
 include/liblvgl/core/../stdlib/builtin/../../lv_conf_internal.h:
 include/liblvgl/core/../stdlib/builtin/../../osal/lv_os.h:
@@ -942,12 +938,12 @@ include/liblvgl/others/observer/lv_observer.h:
 include/liblvgl/libs/qrcode/lv_qrcode_private.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/lv_canvas_private.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image_private.h:
-include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../core/lv_obj_private.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj_private.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image.h:
-include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../lv_conf_internal.h:
-include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../core/lv_obj.h:
-include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../misc/lv_fs.h:
-include/liblvgl/libs/qrcode/../../widgets/canvas/../image/../../draw/lv_draw.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/lv_conf_internal.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/core/lv_obj.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/misc/lv_fs.h:
+c:/Users/Risha/Downloads/robocode2/Override/include/liblvgl/draw/lv_draw.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/lv_canvas.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/../../lv_conf_internal.h:
 include/liblvgl/libs/qrcode/../../widgets/canvas/../image/lv_image.h:
