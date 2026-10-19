@@ -29,8 +29,11 @@ LIBNAME:=LemLib
 VERSION:=0.5.6
 
 # EXCLUDE_SRC_FROM_LIB= $(SRCDIR)/unpublishedfile.c
-# this line excludes opcontrol.c and similar files
-EXCLUDE_SRC_FROM_LIB+=$(foreach file, $(SRCDIR)/main,$(foreach cext,$(CEXTS),$(file).$(cext)) $(foreach cxxext,$(CXXEXTS),$(file).$(cxxext)))
+# this line keeps our robot code (every file directly in src/, not the LemLib code in src/lemlib/)
+# out of the LemLib library. It then goes in the hot package, which starts after the PROS kernel is
+# running. In the library (cold package) its motors/sensors/controller get set up before the kernel
+# has started, and driver control doesn't respond.
+EXCLUDE_SRC_FROM_LIB+=$(foreach ext,$(CEXTS) $(CXXEXTS),$(wildcard $(SRCDIR)/*.$(ext)))
 
 # files that get distributed to every user (beyond your source archive) - add
 # whatever files you want here. This line is configured to add all header files
