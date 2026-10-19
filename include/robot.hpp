@@ -75,6 +75,7 @@ extern bool dr4bTargetForced;
 extern bool dr4bManualMode;
 extern bool dr4bSettling;
 extern int pinLiftCount;
+extern double dr4bSlewDown;   // top speed (degrees/second) the lift PID lowers at right now
 
 // Lift functions (in main.cpp)
 double getDR4BPosition();

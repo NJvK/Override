@@ -67,7 +67,12 @@ constexpr int AUTON_PIN_SCORE_SPEED = 110;      // speed for that last bit over 
 constexpr double AUTON_SCORE_FINISH_TOLERANCE = 0.5;  // inches short that still counts as "there"
 constexpr int AUTON_SCORE_FINISH_SPEED = 40;          // speed for that straight finish (out of 127)
 constexpr int AUTON_SCORE_FINISH_TIMEOUT_MS = 1000;   // gives up after this long (in case it's stuck on the goal)
-constexpr double AUTON_BACKUP_DIST = 4.0;       // backs up this far once the lift is halfway down
+constexpr double AUTON_BACKUP_DIST = 4.0;       // backs up this far once the lift has started down (see AUTON_SCORE_BACKUP_DROP_DEG)
+constexpr double AUTON_SCORE_BACKUP_DROP_DEG = 60.0;  // after letting go of a pin, starts backing up once the lift has dropped this many degrees
+                                                      // (it used to wait until the lift was halfway down). Raise it if it drags the pin off
+// Aiming turn toward the goal when scoring a pin (the preload keeps AUTON_AIM_EXIT_DEG / AUTON_AIM_MIN_SPEED)
+constexpr double AUTON_SCORE_AIM_EXIT_DEG = 2.5;      // done once this close (was 1.5). Lower = more exact but slower
+constexpr int AUTON_SCORE_AIM_MIN_SPEED = 25;         // speed kept at the end of the turn (was 10)
 constexpr double AUTON_CLEAR_DIST = 6.0;        // then backs up this much more so the robot's corners don't hit the goal when it turns (was 4, +2" more)
 
 // Start: toggle mechanism (back of the robot)
@@ -75,15 +80,18 @@ constexpr double AUTON_TOGGLE_LIFT_HEIGHT = 30.0;   // degrees: lift goes up thi
 constexpr double AUTON_TOGGLE_ROTATIONS = 2.0;      // full turns of the toggle (output side). Never goes past this
 constexpr double AUTON_TOGGLE_GEAR_RATIO = 2.0;     // motor turns per toggle turn (1:2 = motor spins 2x for 1 toggle turn)
 constexpr int AUTON_TOGGLE_SPEED = 200;             // motor rpm (same direction as holding A in driver control)
-constexpr int AUTON_TOGGLE_TIMEOUT_MS = 2500;
-constexpr double AUTON_TOGGLE_START_LIFT = 15.0;    // degrees: toggle starts spinning once the lift is this high (doesn't wait for the full lift)
-constexpr double AUTON_TOGGLE_DONE_DEG = 90.0;      // motor degrees: robot starts moving when the toggle is this close to done.
-                                                    // The toggle still finishes its 2 turns exactly on its own and stops there.       // stops trying after this, in case it gets stuck
+constexpr int AUTON_TOGGLE_TIMEOUT_MS = 2500;       // the toggle is switched off after this, in case it gets stuck
+constexpr double AUTON_TOGGLE_START_LIFT = 8.0;     // degrees: toggle starts spinning once the lift is this high (doesn't wait for the full lift). Was 15, lower = starts sooner
+// The robot waits only AUTON_TOGGLE_HEAD_START_MS after the toggle starts spinning, then starts turning to the goal.
+// The toggle still finishes its 2 turns exactly on its own and stops there.
+constexpr int AUTON_TOGGLE_HEAD_START_MS = 300;     // short wait before driving off so it gets both toggles (raise if it still only gets one)
 
 // Preload (scored first, right after the toggles)
 constexpr double AUTON_PRELOAD_CARRY_HEIGHT = 100.0; // degrees: lift rises to this (from 30) while driving to the goal with the preload
 constexpr double AUTON_PRELOAD_DROP_HEIGHT = 10.0;  // degrees: lift lowers to this over the goal before the claw opens
 constexpr int AUTON_PRELOAD_CLAW_OPEN_MS = 500;     // claw opens longer for the preload than for pins (AUTON_CLAW_OPEN_MS)
+constexpr int AUTON_PRELOAD_RELEASE_MS = 200;       // starts backing away this long after the claw starts opening (it keeps opening
+                                                    // while backing up). Was the full AUTON_PRELOAD_CLAW_OPEN_MS (500)
 // Turns this many degrees LESS than straight at the goal for the preload, then drives straight.
 // Raise it if it still turns too far, lower it (or go negative) if it doesn't turn enough.
 constexpr double AUTON_PRELOAD_EXTRA_DIST = -2.0;      // inches. + = drives further toward the goal, - = stops shorter (was -3, now 1" further)
@@ -111,6 +119,9 @@ constexpr double AUTON_PIN2_GRAB_TURN_OFFSET = 8.0;   // was 5, now 3 degrees mo
 constexpr double AUTON_PIN1_SLOW_DIST = 6.0;          // inches before the grab spot where it switches to slow (was 3, same as pin 2 now)
 constexpr int AUTON_PIN1_APPROACH_SPEED = 70;         // top speed driving up to pin 1 (out of 127). Was full speed (127). Lower = slower
 constexpr int AUTON_PIN1_SLOW_SPEED = 20;             // speed for the last slow inches into pin 1 (out of 127). Was AUTON_SLOW_SPEED (30)
+constexpr double AUTON_PIN1_LOWER_SPEED = 480.0;      // degrees/second the lift lowers at after scoring pin 1 (slightly slower than the normal auton 560)
+constexpr double AUTON_PIN2_LIFT_BEFORE_TURN = 50.0;  // degrees: after grabbing pin 2, the lift gets this high before the robot turns to the goal,
+                                                      // then keeps going up to scoring height while it turns. 0 = turn and lift at the same time
 constexpr double AUTON_PIN2_SLOW_DIST = 6.0;          // starts slow earlier for pin 2 (it was still knocking it over)
 constexpr int AUTON_PIN2_EXTRA_CLAW_MS = 400;         // claw keeps spinning at full speed this much longer on pin 2 before the lift goes up (pin 1 = 0)
 constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = 0.0;    // was 3: 3" less, same reason as pin 1
@@ -121,7 +132,9 @@ constexpr double AUTON_PIN2_SCORE_EXTRA_DIST = 0.0;   // not tested yet
 // (fast drive -> slow drive, turn -> drive), the first move hands off early while still rolling.
 constexpr int AUTON_CHAIN_MIN_SPEED = 60;        // drive speed kept at the hand-off (out of 127) (was 40)
 constexpr double AUTON_CHAIN_EXIT_DIST = 1.5;    // inches early the fast part hands off to the slow part
-constexpr int AUTON_TURN_MIN_SPEED = 40;         // turn speed kept at the hand-off (was 30)
+// Turn toward each pin -> drive to it. Keep these small: handing off much earlier/faster (25 degrees at speed 70)
+// made the robot spin in circles, because the drive started while it was still turning fast and far off.
+constexpr int AUTON_TURN_MIN_SPEED = 40;         // turn speed kept at the hand-off
 constexpr double AUTON_TURN_EXIT_DEG = 5.0;      // degrees early a turn hands off to the next drive
 // true = the lift starts going up to scoring height while the robot turns toward the goal
 // (it was only starting once the turn finished). false = old behavior.
@@ -156,6 +169,7 @@ double autonCoastAtDeg = 0.0;     // lift height where the motors switch to coas
 // Auton claw timers (0 = nothing scheduled)
 uint32_t autonClawSlowAtMs = 0;   // when the claw drops from full speed to the slow grabbing speed
 uint32_t autonClawStopAtMs = 0;   // when the claw stops spinning backward after opening
+uint32_t autonToggleStopAtMs = 0; // when the toggle gets switched off in case it's stuck (AUTON_TOGGLE_TIMEOUT_MS)
 
 // Runs the claw timers. Called every 10 ms while auton waits on anything.
 void autonTick() {
@@ -164,6 +178,11 @@ void autonTick() {
     if (autonClawSlowAtMs != 0 && now >= autonClawSlowAtMs) {
         claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
         autonClawSlowAtMs = 0;
+    }
+
+    if (autonToggleStopAtMs != 0 && now >= autonToggleStopAtMs) {
+        toggleMechanism.move_velocity(0);   // normally it has already finished its 2 turns and stopped by itself
+        autonToggleStopAtMs = 0;
     }
 
     if (autonClawStopAtMs != 0 && now >= autonClawStopAtMs) {
@@ -342,8 +361,9 @@ void autonDriveStraight(double targetX, double targetY, double heading, int spee
 // turnOffset: + = turns that many degrees more right before the slow drive in, - = more left
 // extraDist:  + = drives that many inches further forward into the pin, - = stops shorter
 // approachSpeed: top speed driving up to the pin. slowSpeed: speed for the last slowDist inches into it
+// straightApproach: true = turn, then drive straight there right away (no curve). false = curve in (moveToPose)
 void autonGrabPin(double pinX, double pinY, double approachHeading, double turnOffset, double extraDist,
-                  double slowDist, int approachSpeed, int slowSpeed, int extraClawMs) {
+                  double slowDist, int approachSpeed, int slowSpeed, int extraClawMs, bool straightApproach) {
     double rad = approachHeading * PI / 180.0;
     double ux = std::sin(rad);
     double uy = std::cos(rad);
@@ -375,7 +395,13 @@ void autonGrabPin(double pinX, double pinY, double approachHeading, double turnO
 
     // Fast drive to slowDist before the grab spot. Comes to a real stop there
     // (no rolling hand-off) so it can't coast into the pin before the slow part starts.
-    chassis.moveToPose(slowX, slowY, grabHeading, 2500, {.lead = 0.3, .maxSpeed = static_cast<float>(approachSpeed)});
+    if (straightApproach) {
+        // Straight at the point it just turned to face, so it starts driving the moment the turn is done
+        // (the curved drive turned some more first). The square-up turn below lines it up with the pin.
+        chassis.moveToPoint(slowX, slowY, 2500, {.maxSpeed = static_cast<float>(approachSpeed)});
+    } else {
+        chassis.moveToPose(slowX, slowY, grabHeading, 2500, {.lead = 0.3, .maxSpeed = static_cast<float>(approachSpeed)});
+    }
     // Start spinning the claw about 5" before reaching the pin (instead of opening it)
     bool clawSpinning = false;
     while (chassis.isInMotion()) {
@@ -419,11 +445,22 @@ void autonGrabPin(double pinX, double pinY, double approachHeading, double turnO
 // stackPosition = which pin/cup on the goal (1 = first, 2 = second...), uses ALLIANCE_HEIGHTS
 // turnLessDeg: + = turns that many degrees less than straight at the goal, - = more
 // extraDist:   + = drives that many inches further toward the goal, - = stops shorter
-void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
+// liftBeforeTurnDeg: > 0 = waits for the lift to get this high before turning (keeps lifting while it turns)
+// lowerSpeed:  > 0 = lift lowers at this speed (degrees/second) after letting go, 0 = normal auton speed
+void autonScore(int stackPosition, double turnLessDeg, double extraDist, double liftBeforeTurnDeg, double lowerSpeed) {
     double height = getStackHeight(GOAL_ALLIANCE, stackPosition);
 
-    if (AUTON_LIFT_DURING_TURN) {
+    if (AUTON_LIFT_DURING_TURN || liftBeforeTurnDeg > 0.0) {
         autonSetLift(height);   // start lifting now so it's up sooner
+    }
+
+    // Lift it off the ground first, then turn (the lift keeps going up to full height during the turn)
+    if (liftBeforeTurnDeg > 0.0) {
+        uint32_t liftStart = pros::millis();
+        while (getDR4BPosition() < liftBeforeTurnDeg && pros::millis() - liftStart < 800) {
+            autonTick();
+            pros::delay(10);
+        }
     }
 
     // Turn toward the goal, adjusted by turnLessDeg (the claw drops to the slow speed during this turn)
@@ -433,7 +470,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
     turn -= (turn >= 0 ? turnLessDeg : -turnLessDeg);
     double aimHeading = startPose.theta + turn;
 
-    chassis.turnToHeading(aimHeading, AUTON_AIM_TURN_TIMEOUT_MS, {.minSpeed = AUTON_AIM_MIN_SPEED, .earlyExitRange = AUTON_AIM_EXIT_DEG});
+    chassis.turnToHeading(aimHeading, AUTON_AIM_TURN_TIMEOUT_MS, {.minSpeed = AUTON_SCORE_AIM_MIN_SPEED, .earlyExitRange = AUTON_SCORE_AIM_EXIT_DEG});
     autonWaitMotion();
 
     // Drive straight along the aim heading
@@ -478,13 +515,17 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
     }
 
     // Lower the lift and open the claw at the same time
+    double normalLowerSpeed = dr4bSlewDown;
+    if (lowerSpeed > 0.0) {
+        dr4bSlewDown = lowerSpeed;
+    }
     autonLowerLiftCoast(AUTON_LOW_HEIGHT);   // coasts the last AUTON_LIFT_COAST_DIST degrees
     autonOpenClaw();
 
-    // Halfway down: back up
-    double halfway = (height + AUTON_LOW_HEIGHT) / 2.0;
+    // Back up once the lift has dropped AUTON_SCORE_BACKUP_DROP_DEG (or is halfway down, if that comes first)
+    double backUpAt = std::max(height - AUTON_SCORE_BACKUP_DROP_DEG, (height + AUTON_LOW_HEIGHT) / 2.0);
     uint32_t lowerStart = pros::millis();
-    while (getDR4BPosition() > halfway && pros::millis() - lowerStart < 600) {
+    while (getDR4BPosition() > backUpAt && pros::millis() - lowerStart < 600) {
         autonTick();
         pros::delay(10);
     }
@@ -494,6 +535,8 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
     chassis.moveToPoint(scoreX - backDist * ux, scoreY - backDist * uy, 800,
                         {.forwards = false, .minSpeed = AUTON_STOP_MIN_SPEED, .earlyExitRange = AUTON_BACKUP_EXIT_DIST});
     autonWaitMotion();
+
+    dr4bSlewDown = normalLowerSpeed;   // back to the normal auton lowering speed
 }
 
 // Drives the preload to the alliance goal, lowers it onto the goal, lets go and backs off
@@ -547,9 +590,13 @@ void autonScorePreload() {
     autonWaitLift(AUTON_PRELOAD_DROP_HEIGHT, 700);
 
     autonOpenClaw(AUTON_PRELOAD_CLAW_OPEN_MS);   // opens a little longer for the preload
-    while (autonClawStopAtMs != 0) {   // wait until it has finished opening
-        autonTick();
-        pros::delay(10);
+    {
+        // Short wait so the claw lets go, then back up while it finishes opening
+        uint32_t releaseStart = pros::millis();
+        while (autonClawStopAtMs != 0 && pros::millis() - releaseStart < AUTON_PRELOAD_RELEASE_MS) {
+            autonTick();
+            pros::delay(10);
+        }
     }
 
     // Back straight away from the goal
@@ -590,16 +637,18 @@ void twoPinAlliance() {
     toggleMechanism.tare_position();
     toggleMechanism.move_absolute(toggleTargetDeg, AUTON_TOGGLE_SPEED);
 
-    uint32_t toggleStart = pros::millis();
-    while (std::fabs(toggleMechanism.get_position() - toggleTargetDeg) > AUTON_TOGGLE_DONE_DEG
-           && pros::millis() - toggleStart < AUTON_TOGGLE_TIMEOUT_MS) {
-        autonTick();
-        pros::delay(10);
-    }
-    // No stop command here: move_absolute keeps going and stops itself exactly at 2 turns
-    // while the robot starts turning toward the goal. (If it got stuck and timed out, stop it.)
-    if (pros::millis() - toggleStart >= AUTON_TOGGLE_TIMEOUT_MS) {
-        toggleMechanism.move_velocity(0);
+    // No waiting for the toggle: move_absolute keeps going and stops itself exactly at 2 turns
+    // while the robot starts turning toward the goal. If it gets stuck, autonTick switches it
+    // off after AUTON_TOGGLE_TIMEOUT_MS.
+    autonToggleStopAtMs = pros::millis() + AUTON_TOGGLE_TIMEOUT_MS;
+
+    // Short head start for the toggle before the robot drives off
+    {
+        uint32_t headStart = pros::millis();
+        while (pros::millis() - headStart < static_cast<uint32_t>(AUTON_TOGGLE_HEAD_START_MS)) {
+            autonTick();
+            pros::delay(10);
+        }
     }
 
     // Lift goes straight from 30 up to the preload carry height now, while the robot turns
@@ -615,14 +664,18 @@ void twoPinAlliance() {
     // 4. Pin + cup 1 (one tile left of the goal) -> goal
     autonGrabPin(AUTON_PIN1_X, AUTON_PIN1_Y, AUTON_PIN1_APPROACH_HEADING,
                  AUTON_PIN1_GRAB_TURN_OFFSET, AUTON_PIN1_GRAB_EXTRA_DIST, AUTON_PIN1_SLOW_DIST,
-                 AUTON_PIN1_APPROACH_SPEED, AUTON_PIN1_SLOW_SPEED, 0);
-    autonScore(AUTON_PIN1_STACK, AUTON_PIN1_SCORE_TURN_LESS, AUTON_PIN1_SCORE_EXTRA_DIST);
+                 AUTON_PIN1_APPROACH_SPEED, AUTON_PIN1_SLOW_SPEED, 0,
+                 true);   // pin 1: turn, then drive straight there right away
+    autonScore(AUTON_PIN1_STACK, AUTON_PIN1_SCORE_TURN_LESS, AUTON_PIN1_SCORE_EXTRA_DIST,
+               0.0, AUTON_PIN1_LOWER_SPEED);   // pin 1: lifts while turning, lowers slightly slower
 
     // 5. Pin + cup 2 (one tile above the goal) -> goal
     autonGrabPin(AUTON_PIN2_X, AUTON_PIN2_Y, AUTON_PIN2_APPROACH_HEADING,
                  AUTON_PIN2_GRAB_TURN_OFFSET, AUTON_PIN2_GRAB_EXTRA_DIST, AUTON_PIN2_SLOW_DIST,
-                 127, AUTON_SLOW_SPEED, AUTON_PIN2_EXTRA_CLAW_MS);   // pin 2: full speed in, same slow speed as before, longer claw spin
-    autonScore(AUTON_PIN2_STACK, AUTON_PIN2_SCORE_TURN_LESS, AUTON_PIN2_SCORE_EXTRA_DIST);
+                 127, AUTON_SLOW_SPEED, AUTON_PIN2_EXTRA_CLAW_MS,   // pin 2: full speed in, same slow speed as before, longer claw spin
+                 false);  // pin 2: still curves in, so it stays clear of the goal
+    autonScore(AUTON_PIN2_STACK, AUTON_PIN2_SCORE_TURN_LESS, AUTON_PIN2_SCORE_EXTRA_DIST,
+               AUTON_PIN2_LIFT_BEFORE_TURN, 0.0);   // pin 2: lift it off the ground first, then turn while lifting the rest
 
     claw.move_velocity(0);
 }
