@@ -1,4 +1,4 @@
-// Autonomous: preload + 2 pins on the alliance goal. Called from autonomous() in 3pinauto_driverside.cpp.
+// Autonomous: preload + 2 pins on the alliance goal. Called from autonomous() in main.cpp.
 #include "robot.hpp"
 
 // =====================================================================

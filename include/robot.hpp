@@ -1,7 +1,7 @@
 #pragma once
-// Shared by 3pinauto_driverside.cpp (robot setup + driver control) and auton.cpp (the auton):
+// Shared by main.cpp (robot setup + driver control) and auton.cpp (the auton):
 // the devices, settings and lift functions the auton uses. The devices themselves are created
-// in 3pinauto_driverside.cpp; this file only tells auton.cpp they exist.
+// in main.cpp; this file only tells auton.cpp they exist.
 
 #include "main.h"            // all the PROS devices
 #include "lemlib/api.hpp"
@@ -10,7 +10,7 @@
 #include <cmath>
 #include <cstdint>
 
-// Devices (ports are set in 3pinauto_driverside.cpp)
+// Devices (ports are set in main.cpp)
 extern lemlib::Chassis chassis;
 extern pros::Motor claw;
 extern pros::Motor toggleMechanism;
@@ -69,14 +69,14 @@ enum GoalType {
     GOAL_NEUTRAL = 1
 };
 
-// Lift state (in 3pinauto_driverside.cpp)
+// Lift state (in main.cpp)
 extern double dr4bTarget;
 extern bool dr4bTargetForced;
 extern bool dr4bManualMode;
 extern bool dr4bSettling;
 extern int pinLiftCount;
 
-// Lift functions (in 3pinauto_driverside.cpp)
+// Lift functions (in main.cpp)
 double getDR4BPosition();
 double getStackHeight(GoalType goal, int count);
 
