@@ -2,6 +2,10 @@
 // Two starting spots: right wall (original) or top wall (mirror). Pick with AUTON_START_ON_TOP.
 #include "robot.hpp"
 
+// Everything in this file is private to it (so the other auton files can use the same names),
+// except the routine at the bottom that autonomous() in main.cpp calls.
+namespace {
+
 // =====================================================================
 //              AUTON: 2 PINS ON THE ALLIANCE GOAL (tuning)
 // =====================================================================
@@ -156,7 +160,7 @@ constexpr bool AUTON_START_ON_TOP = false;
 
 // true = run the 1-minute SKILLS routine instead (see the SKILLS block further down). It starts on the LEFT wall.
 // AUTON_START_ON_TOP is ignored when this is true.
-constexpr bool AUTON_RUN_SKILLS = false;
+constexpr bool AUTON_RUN_SKILLS = true;
 
 // =====================================================================
 //        TOP-WALL START (mirror of the right-wall route) - tuning
@@ -1033,6 +1037,8 @@ void skillsAuton() {
     // 4. Always finish with the toggle (x2) and park
     skillsToggleAndPark();
 }
+
+}  // namespace
 
 // Called from autonomous() in main.cpp. Runs skills if AUTON_RUN_SKILLS, otherwise the qual route
 // picked with AUTON_START_ON_TOP.

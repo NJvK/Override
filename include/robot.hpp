@@ -81,5 +81,7 @@ extern double dr4bSlewDown;   // top speed (degrees/second) the lift PID lowers 
 double getDR4BPosition();
 double getStackHeight(GoalType goal, int count);
 
-// Autonomous routines (in auton.cpp)
-void twoPinAlliance();
+// Autonomous routines. Call one of these from autonomous() in main.cpp.
+void twoPinAlliance();    // auton.cpp:       preload + 2 pins (right wall)
+void mirrorAlliance();    // autonmirror.cpp: 3-pin route, right wall or top wall (AUTON_START_ON_TOP in that file)
+void manyPinAlliance();   // skillsauto.cpp:  same 3-pin route, or the 1-minute skills run if AUTON_RUN_SKILLS is true there

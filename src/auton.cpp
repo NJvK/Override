@@ -1,6 +1,10 @@
 // Autonomous: preload + 2 pins on the alliance goal. Called from autonomous() in main.cpp.
 #include "robot.hpp"
 
+// Everything in this file is private to it (so the other auton files can use the same names),
+// except the routine at the bottom that autonomous() in main.cpp calls.
+namespace {
+
 // =====================================================================
 //              AUTON: 2 PINS ON THE ALLIANCE GOAL (tuning)
 // =====================================================================
@@ -607,6 +611,8 @@ void autonScorePreload() {
     // Back up to grab height for the pins (happens while it drives to pin 1)
     autonLowerLiftCoast(AUTON_LOW_HEIGHT);   // coasts the last AUTON_LIFT_COAST_DIST degrees
 }
+
+}  // namespace
 
 // Scores the preload + 2 pins and cups on the alliance goal
 void twoPinAlliance() {

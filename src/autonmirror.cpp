@@ -2,6 +2,10 @@
 // Two starting spots: right wall (original) or top wall (mirror). Pick with AUTON_START_ON_TOP.
 #include "robot.hpp"
 
+// Everything in this file is private to it (so the other auton files can use the same names),
+// except the routine at the bottom that autonomous() in main.cpp calls.
+namespace {
+
 // =====================================================================
 //              AUTON: 2 PINS ON THE ALLIANCE GOAL (tuning)
 // =====================================================================
@@ -718,7 +722,9 @@ const AutonRoute TOP_ROUTE = {
     TOP_PIN2_GRAB_TURN_OFFSET, TOP_PIN2_GRAB_EXTRA_DIST, TOP_PIN2_SCORE_TURN_LESS, TOP_PIN2_SCORE_EXTRA_DIST
 };
 
+}  // namespace
+
 // Called from autonomous() in main.cpp. Picks the route with AUTON_START_ON_TOP.
-void twoPinAlliance() {
+void mirrorAlliance() {
     runThreePinRoute(AUTON_START_ON_TOP ? TOP_ROUTE : RIGHT_ROUTE);
 }
