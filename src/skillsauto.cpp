@@ -14,24 +14,38 @@ namespace skills_file {
 // Headings: 0 = facing the top of the map, 90 = facing right, 180 = facing down, 270 = facing left.
 // One tile = 24 inches.
 
-// Start: back of the robot against the right wall, in the middle of the wall, claw facing into the field.
-// The robot is 18" long, so its center is 9" off the wall (wall is at X = 72).
-constexpr double AUTON_START_X = 62.0;
-constexpr double AUTON_START_Y = 0;
+// ---------------------------------------------------------------------
+// IDEAL FIELD + ROBOT GEOMETRY
+// Every position below is worked out from these: exact tile spots on the field (24" tiles, walls at +-72),
+// adjusted for the robot's size so the CLAW (not the robot's center) ends up on the right spot.
+// ---------------------------------------------------------------------
+constexpr double TILE = 24.0;                    // one field tile
+constexpr double FIELD_HALF = 3.0 * TILE;        // walls are at x = +-72 and y = +-72
+constexpr double ROBOT_LENGTH = 18.0;            // claw (front) to toggle (back)
+constexpr double ROBOT_WIDTH = 15.5;
+constexpr double ROBOT_CENTER_TO_BACK = ROBOT_LENGTH / 2.0;   // tracking center (middle of the drive wheels) to the back
+constexpr double ROBOT_CENTER_TO_FRONT = ROBOT_LENGTH / 2.0;  // tracking center to the front
+constexpr double ROBOT_HALF_DIAG = 11.88;        // sqrt(9^2 + 7.75^2): how far the corners swing out when it turns in place
+constexpr double GOAL_HALF = 4.0;                // half the width of a goal's base
+constexpr double SMALL_PIN_RADIUS = 2.0;         // the small pins on the diamond corners
+
+// Start: back of the robot flat against the right wall, centered on the wall, claw facing into the field.
+constexpr double AUTON_START_X = FIELD_HALF - ROBOT_CENTER_TO_BACK;   // 72 - 9 = 63
+constexpr double AUTON_START_Y = 0.0;                 // middle of the wall
 constexpr double AUTON_START_HEADING = 270.0;
 
 // Alliance goal (the one being scored on)
-constexpr double AUTON_GOAL_X = 48.0;
-constexpr double AUTON_GOAL_Y = 24.0;
+constexpr double AUTON_GOAL_X = 2.0 * TILE;          // 48: alliance goal sits on a tile corner
+constexpr double AUTON_GOAL_Y = 1.0 * TILE;          // 24
 
 // Pin + cup 1: one tile left of the goal
-constexpr double AUTON_PIN1_X = 24.0;
-constexpr double AUTON_PIN1_Y = 23.0;
+constexpr double AUTON_PIN1_X = 1.0 * TILE;          // 24 (field pins aren't used in skills)
+constexpr double AUTON_PIN1_Y = 1.0 * TILE;          // 24 (was tuned to 23)
 constexpr double AUTON_PIN1_APPROACH_HEADING = 322.0;  // drives in from the lower right (stays clear of the small pin below it)
 
 // Pin + cup 2: one tile above the goal
-constexpr double AUTON_PIN2_X = 48.0;
-constexpr double AUTON_PIN2_Y = 48.0;
+constexpr double AUTON_PIN2_X = 2.0 * TILE;          // 48
+constexpr double AUTON_PIN2_Y = 2.0 * TILE;          // 48
 constexpr double AUTON_PIN2_APPROACH_HEADING = 43.0;   // drives in along the diagonal line from the lower left (stays clear of the goal)
 
 // Lift
@@ -91,8 +105,8 @@ constexpr double AUTON_PRELOAD_DROP_HEIGHT = 10.0;  // degrees: lift lowers to t
 constexpr int AUTON_PRELOAD_CLAW_OPEN_MS = 500;     // claw opens longer for the preload than for pins (AUTON_CLAW_OPEN_MS)
 // Turns this many degrees LESS than straight at the goal for the preload, then drives straight.
 // Raise it if it still turns too far, lower it (or go negative) if it doesn't turn enough.
-constexpr double AUTON_PRELOAD_EXTRA_DIST = -2.0;      // inches. + = drives further toward the goal, - = stops shorter (was -3, now 1" further)
-constexpr double AUTON_PRELOAD_TURN_LESS_DEG = -6.8;   // negative = turns that many degrees MORE than straight at the goal (was -4.8, now 2 more)
+constexpr double AUTON_PRELOAD_EXTRA_DIST = 0.0;       // ideal: claw lands exactly on the goal (tuned value was -2)
+constexpr double AUTON_PRELOAD_TURN_LESS_DEG = 0.0;    // ideal: aims straight at the goal (tuned value was -6.8)
 constexpr double AUTON_PRELOAD_BACKUP = 10.0;       // inches it backs away from the goal after letting go (was 8, +2" more)
 
 // Which stack spot each pin goes on (picks the height from ALLIANCE_HEIGHTS).
@@ -763,31 +777,44 @@ const AutonRoute TOP_ROUTE = {
 // Red goal B = (-24, -48): the goal in the bottom quadrant. A pin-only "preload" from the matchloader, then 4 matchloads.
 
 // --- Matchloader (bottom of the left wall) ---
-constexpr double SKILLS_LOADER_Y = -60.0;          // Y of the matchloader opening (robot lines up on this)
-constexpr double SKILLS_LOADER_GRAB_X = -61.5;     // robot center X when the claw is right under the loader opening. TUNE THIS FIRST
-constexpr double SKILLS_LOADER_LINEUP_X = -48.0;   // where the straight drive into the loader starts (13.5" out)
+// The loader sits on the left wall, centered on the bottom row of tiles (y = -2.5 tiles = -60).
+// Pins drop SKILLS_LOADER_PIN_FROM_WALL inches out from the wall; the robot's center stops AUTON_CLAW_REACH
+// behind that so the claw is right under the opening.
+constexpr double SKILLS_LOADER_Y = -2.5 * TILE;                                   // -60
+constexpr double SKILLS_LOADER_PIN_FROM_WALL = 2.5;                               // loader opening center, inches out from the wall
+constexpr double SKILLS_LOADER_PIN_X = -FIELD_HALF + SKILLS_LOADER_PIN_FROM_WALL; // -69.5
+constexpr double SKILLS_LOADER_GRAB_X = SKILLS_LOADER_PIN_X + AUTON_CLAW_REACH;   // -61.5: robot center when grabbing
+constexpr double SKILLS_LOADER_LINEUP_X = SKILLS_LOADER_GRAB_X + 13.5;            // -48: straight drive in starts 13.5" out
 // The robot turns to face the loader HERE, 4" further from the bottom wall than the loader line, because
 // its corners swing out 11.9" when it turns and would hit the wall if it turned on the loader line itself.
-constexpr double SKILLS_LOADER_TURN_X = -40.0;
-constexpr double SKILLS_LOADER_TURN_Y = -56.0;
+// (SKILLS_LOADER_TURN_X/Y are worked out below, after goal B)
 constexpr int SKILLS_LOADER_DRIVE_IN_SPEED = 90;   // top speed of the straight drive into the loader; it slows down on its own near the end (was a flat 45)
 constexpr double SKILLS_LOADER_BACKOUT_DIST = 6.0; // straight back out of the loader this far before anything else (was 8)
-// After backing out it goes here (away from the wall) before turning to a goal, so the corners clear the wall
-constexpr double SKILLS_SCORE_SPOT_X = -44.0;
-constexpr double SKILLS_SCORE_SPOT_Y = -54.0;
+// (SKILLS_SCORE_SPOT_X/Y, where it turns toward a goal after leaving the loader, are worked out below)
 constexpr int SKILLS_MATCHLOAD_HOLD_MS = 2000;     // claw spins at full speed this long at the loader before lifting
 constexpr double SKILLS_LOAD_RISE = 10.0;          // degrees the lift goes up after a matchload / the pin-only load (field pins still use AUTON_PIN_PICKUP_RISE)
 constexpr int SKILLS_PIN_ONLY_WAIT_MS = 1000;      // claw stays open and still under the loader this long for the pin-only load
 
 // --- Goal B (bottom quadrant) ---
-constexpr double SKILLS_GOAL_B_X = -24.0;
-constexpr double SKILLS_GOAL_B_Y = -48.0;
+constexpr double SKILLS_GOAL_B_X = -1.0 * TILE;   // -24
+constexpr double SKILLS_GOAL_B_Y = -2.0 * TILE;   // -48
+constexpr double SKILLS_GOAL_A_X = -AUTON_GOAL_X;  // -48 (skills runs the qual route turned around)
+constexpr double SKILLS_GOAL_A_Y = -AUTON_GOAL_Y;  // -24
+
+// --- Route points worked out from the field + robot size ---
+// Turn spot before the loader: far enough off the bottom wall that the corners clear it while turning
+// (half-diagonal + 4" spare), and far enough left of goal B that the corners clear goal B (half-diagonal + 1").
+constexpr double SKILLS_LOADER_TURN_X = (SKILLS_GOAL_B_X - GOAL_HALF) - ROBOT_HALF_DIAG - 1.0;   // -40.9
+constexpr double SKILLS_LOADER_TURN_Y = -FIELD_HALF + ROBOT_HALF_DIAG + 4.0;                     // -56.1
+// Scoring spot after leaving the loader: 4" past the line-up spot, and 6" of spare between the corners and the wall
+constexpr double SKILLS_SCORE_SPOT_X = SKILLS_LOADER_LINEUP_X + 4.0;                             // -44
+constexpr double SKILLS_SCORE_SPOT_Y = -FIELD_HALF + ROBOT_HALF_DIAG + 6.0;                      // -54.1
 
 // --- Scoring offsets for the new scores (same meaning as the AUTON_ ones). Start at 0 and tune ---
 constexpr double SKILLS_A_SCORE_TURN_LESS = 0.0;   // matchloads onto goal A
 constexpr double SKILLS_A_SCORE_EXTRA_DIST = 0.0;
 constexpr double SKILLS_B_PRELOAD_TURN_LESS = 0.0; // pin-only "preload" onto goal B
-constexpr double SKILLS_B_PRELOAD_EXTRA_DIST = -2.0;   // same as the qual preload (-2) since it scores the same way
+constexpr double SKILLS_B_PRELOAD_EXTRA_DIST = 0.0;    // ideal: claw lands exactly on the goal (tuned value was -2)
 constexpr double SKILLS_B_SCORE_TURN_LESS = 0.0;   // matchloads onto goal B
 constexpr double SKILLS_B_SCORE_EXTRA_DIST = 0.0;
 
@@ -816,24 +843,40 @@ constexpr int SKILLS_B_LOADS = 3;
 // (there isn't room to pass goal A on the wall side and still turn), then down the middle to the loader turn spot.
 // WAY1 is above-right of goal A (clear of the small red pin at the left corner of the center diamond),
 // WAY2 is between goal A and goal B.
-constexpr double SKILLS_FIRST_WAY1_X = -34.0, SKILLS_FIRST_WAY1_Y = -11.0;
-constexpr double SKILLS_FIRST_WAY2_X = -38.0, SKILLS_FIRST_WAY2_Y = -40.0;
+// WAY1: halfway between goal A's row and the center row (y = -0.5 tiles), far enough right of goal A
+//       that the corners clear it when the robot turns down.
+// WAY2: the tile corner between goal A and goal B (-1.5, -1.5 tiles), the middle of the gap between them.
+constexpr double SKILLS_FIRST_WAY1_X = (SKILLS_GOAL_A_X + GOAL_HALF) + ROBOT_HALF_DIAG + 0.5;   // -31.6
+constexpr double SKILLS_FIRST_WAY1_Y = -0.5 * TILE;                                             // -12
+constexpr double SKILLS_FIRST_WAY2_X = -1.5 * TILE;                                             // -36
+constexpr double SKILLS_FIRST_WAY2_Y = -1.5 * TILE;                                             // -36
 
 // --- Sweep toggle at the end (claw side, right corner first then left corner) ---
 // Route from goal B: up through the gap between the two goals to WAY1 (above goal B), then over to the start spot.
 // (Assumes both field pins the qual auton picks up are off the field.)
-constexpr double SKILLS_SWEEP_WAY1_X = -31.0, SKILLS_SWEEP_WAY1_Y = -29.0;
+// WAY1: 6" past the middle of the gap between goal A and goal B, heading out toward the field center.
+constexpr double SKILLS_SWEEP_WAY1_X = -1.5 * TILE + 6.0 * 0.7071;   // -31.8
+constexpr double SKILLS_SWEEP_WAY1_Y = -1.5 * TILE + 6.0 * 0.7071;   // -31.8
 // Sweep start spot. From here it faces SKILLS_SWEEP_HEADING_1 and drives in, so the robot's front-RIGHT corner
 // hits the toggle first (around x = 0), then it swings to SKILLS_SWEEP_HEADING_2 so the front-LEFT corner hits.
-constexpr double SKILLS_SWEEP_START_X = -4.0, SKILLS_SWEEP_START_Y = -40.0;
+// The start spot is worked out from the toggle's position and the robot's size (see skillsSweepToggleAndPark):
+// it's SKILLS_SWEEP_RUN_IN inches back from where the front-right corner touches the toggle.
+constexpr double SKILLS_SWEEP_TOGGLE_X = 0.0;          // toggle is centered on the bottom wall
+constexpr double SKILLS_SWEEP_TOGGLE_DEPTH = 1.0;      // how far the toggle sticks out from the wall (inches)
+constexpr double SKILLS_SWEEP_TOGGLE_FACE_Y = -FIELD_HALF + SKILLS_SWEEP_TOGGLE_DEPTH;   // -71
+constexpr double SKILLS_SWEEP_RUN_IN = 21.0;           // inches of straight drive into the toggle
 constexpr double SKILLS_SWEEP_HEADING_1 = 165.0;   // facing the bottom wall, angled so the right corner leads
 constexpr double SKILLS_SWEEP_HEADING_2 = 195.0;   // swung the other way so the left corner hits
-constexpr double SKILLS_SWEEP_DRIVE_IN = 23.0;     // max inches it drives in (stops early when it hits the toggle/wall)
+constexpr double SKILLS_SWEEP_DRIVE_IN = SKILLS_SWEEP_RUN_IN + 2.0;   // max drive in (stops early when it hits)
 constexpr int SKILLS_SWEEP_DRIVE_SPEED = 70;
 constexpr int SKILLS_SWEEP_SWING_SPEED = 90;       // left side speed for the swing (right side stays put)
 constexpr int SKILLS_SWEEP_SWING_MS = 450;         // max time for the swing
 // Then full speed straight back toward the center. Motors cut to coast at this Y and momentum carries it in.
-constexpr double SKILLS_PARK_COAST_Y = -30.0;
+// Where it should end: back of the robot 1" short of the center goal. Power cuts SKILLS_PARK_COAST_DIST
+// inches before that and momentum carries it in.
+constexpr double SKILLS_PARK_STOP_Y = -(GOAL_HALF + ROBOT_CENTER_TO_BACK + 1.0);    // -14
+constexpr double SKILLS_PARK_COAST_DIST = 16.0;
+constexpr double SKILLS_PARK_COAST_Y = SKILLS_PARK_STOP_Y - SKILLS_PARK_COAST_DIST; // -30
 constexpr int SKILLS_PARK_MAX_MS = 1500;
 
 // --- Time guard ---
@@ -1176,6 +1219,15 @@ void skillsSweepToggleAndPark() {
     chassis.moveToPoint(SKILLS_SWEEP_WAY1_X, SKILLS_SWEEP_WAY1_Y, 1200,
                         {.minSpeed = AUTON_TURN_MIN_SPEED, .earlyExitRange = 1.5});
     autonWaitMotion();
+    // Sweep start from the field + robot size: at heading 1, the front-right corner sits
+    // (front * |cos| + halfWidth * |sin|) ahead of the center toward the wall.
+    const double h1 = SKILLS_SWEEP_HEADING_1 * PI / 180.0;
+    const double cornerDepth = ROBOT_CENTER_TO_FRONT * std::fabs(std::cos(h1)) + (ROBOT_WIDTH / 2.0) * std::fabs(std::sin(h1));
+    const double contactX = SKILLS_SWEEP_TOGGLE_X;
+    const double contactY = SKILLS_SWEEP_TOGGLE_FACE_Y + cornerDepth;   // robot center when the corner touches
+    const double SKILLS_SWEEP_START_X = contactX - SKILLS_SWEEP_RUN_IN * std::sin(h1);
+    const double SKILLS_SWEEP_START_Y = contactY - SKILLS_SWEEP_RUN_IN * std::cos(h1);
+
     chassis.turnToPoint(SKILLS_SWEEP_START_X, SKILLS_SWEEP_START_Y, 800,
                         {.minSpeed = AUTON_TURN_MIN_SPEED, .earlyExitRange = AUTON_TURN_EXIT_DEG});
     autonWaitMotion();

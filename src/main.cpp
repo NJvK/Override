@@ -780,7 +780,7 @@ void initialize() {
             pros::delay(50);
         }
     });
-}
+}   
 
 // Autonomous selector (only runs when field control / a competition switch starts autonomous)
 void autonomous() {
