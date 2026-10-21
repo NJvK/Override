@@ -7,23 +7,134 @@ pros::Controller controller(pros::E_CONTROLLER_MASTER);
 pros::MotorGroup leftMotors({-1, -11, -12}, pros::MotorGearset::blue);
 pros::MotorGroup rightMotors({19, 10, 20}, pros::MotorGearset::blue);
 
+// (all tuning values are in the ODOMETRY + DRIVE PID TUNING block below)
+// =====================================================================
+//              ODOMETRY + DRIVE PID TUNING (all in one place)
+// =====================================================================
+// Goal: the brain screen's X / Y / heading (top line) matches where the robot REALLY is, every run,
+// and the robot stops exactly where auton tells it to. Tune in this order - each step depends on the one before:
+//
+//   1. IMU       - heading must be right before anything else (odometry uses it for every move)
+//   2. ODOMETRY  - tracking wheel directions, sizes, then offsets (position must be right before PID)
+//   3. TURN PID  - angular gains (turns land on the angle, fast, no wobble)
+//   4. DRIVE PID - linear gains (drives land on the spot, fast, no rocking)
+//   5. EXITS     - how close/long counts as "done" (accuracy vs speed)
+//
+// TUNING_TEST below runs a test instead of the auton (needs a competition switch / field control).
+// Use a fully charged battery, on field tiles, and change ONE number at a time.
+// =====================================================================
+
+// Which test autonomous() runs. 0 = OFF (normal auton). Set back to 0 before competing!
+//   1 = ODOM CHECK:   does nothing; push the robot by hand. CONTROLLER shows the raw wheel distances
+//                     (V = vertical wheel, H = horizontal wheel, inches since the test started) and X / Y / Th
+//   5 = SPIN TEST:    the robot spins itself slowly 5 turns in place, then the CONTROLLER shows the measured
+//                     offset for each wheel (copy  them into ODOM_VERTICAL_OFFSET / ODOM_HORIZONTAL_OFFSET)
+//   2 = TURN TEST:    turns to 90, then back to 0, three times (step 3)
+//   3 = DRIVE TEST:   drives 48" forward, then back to the start (step 4)
+//   4 = SQUARE TEST:  drives a 24" square and comes back to the start; the screen should read ~0, 0, 0 at the end.
+//                     Run it 3 times: if the end error is the same each time, it's PID/offsets;
+//                     if it's different each time, it's wheel slip or a loose tracking wheel.
+constexpr int TUNING_TEST = 0;
+
+// ---------------- 1. IMU ----------------
+// The IMU must sit still while it calibrates (about 2-3 s when the program starts). Don't touch the robot then.
+// Check: spin the robot by hand exactly 5 full turns and line it back up. Th should read 1800 (+-2).
+// If it reads e.g. 1790, the IMU is slightly off; LemLib can't scale it, but a remount (flat, firmly screwed,
+// away from motors) usually fixes it. Your last check read 1800: perfect, nothing to tune here.
+constexpr int IMU_PORT = 17;
+
+// ---------------- 2. ODOMETRY (tracking wheels) ----------------
+// Use TUNING_TEST = 1 for (a) and (b), TUNING_TEST = 5 for (c). Do them in order.
+// (a) DIRECTION (test 1): push the robot forward -> V must go UP. Slide it to ITS right -> H must go UP.
+//     If one goes the wrong way, flip that port's sign (13 <-> -13).
+// (b) SIZE (test 1): push forward exactly 96" (4 tiles) along a wall, keeping it straight. V should read 96.0.
+//     New ODOM_VERTICAL_DIAMETER = current diameter * 96 / V reading.
+//     Horizontal: if it's the same wheel + sensor as the vertical one, just copy the vertical diameter
+//     (sliding the robot sideways is hard to do straight, so this is more exact than a sideways push).
+// (c) OFFSET (test 5): the robot spins 5 turns in place and works out each wheel's offset for you.
+//     Copy the numbers it shows, then run test 5 again: X and Y should end within ~0.5" of 0.
+//     Signs: vertical wheel + if it's RIGHT of center, - if LEFT. Horizontal wheel + if in FRONT, - if BEHIND.
+//     If the second run drifts MORE than the first, flip that offset's sign.
+constexpr int ODOM_VERTICAL_PORT = -14;            // tracks forward/back (Y)
+constexpr int ODOM_HORIZONTAL_PORT = 13;           // tracks sideways (X)
+constexpr double ODOM_VERTICAL_DIAMETER = 2.01258746176;   // inches (was NEW_275: 2.75 * 48 / 66.6) 
+constexpr double ODOM_HORIZONTAL_DIAMETER = 2.00836820084; // inches (was NEW_275: 2.75 * 24 / 33.4)
+constexpr double ODOM_VERTICAL_OFFSET = -0.1;      // inches left(-)/right(+) of the turning center
+constexpr double ODOM_HORIZONTAL_OFFSET = -2.25;    // inches behind(-)/in front of(+) the turning center
+
+// ---------------- Drivetrain (measure once, rarely changes) ----------------
+// TRACK WIDTH = distance between the LEFT and RIGHT wheel centers. Mostly used for path following.
+// NOTE: you told me the drive wheels are 12.5" apart side to side; this says 10. Measure and fix if needed.
+constexpr double DRIVE_TRACK_WIDTH = 12.625;         // inches
+constexpr double DRIVE_WHEEL_RPM = 450.0;          // wheel rpm (blue 600 rpm motors geared to 360)
+// HORIZONTAL DRIFT: how much the robot slides sideways in curves (boomerang moves). 2 = all omni wheels,
+// 8 = traction wheels in the middle. Raise if curved moves (moveToPose) swing wide and miss the end spot.
+constexpr double DRIVE_HORIZONTAL_DRIFT = 8.0;
+
+// ---------------- 3. TURN PID (angular) ----------------
+// Run TUNING_TEST = 2 and watch Th on the screen.
+//   - Set TURN_KD to 0. Raise TURN_KP until the robot overshoots 90 a little and wobbles back and forth.
+//   - Raise TURN_KD until the wobble stops and it settles cleanly.
+//   - If it now creeps slowly into the last degree or two: raise TURN_KP a bit, then re-raise TURN_KD.
+//   - Done when it lands within 1 degree with no wobble, quickly. Leave TURN_KI at 0.
+// Creeping into the last degree is what made auton turns slow before - a sharp turn PID speeds up every turn.
+constexpr double TURN_KP = 3.7;
+constexpr double TURN_KI = 0.0;
+constexpr double TURN_KD = 25.5;
+constexpr double TURN_SLEW = 0.0;                  // 0 = off. Turns don't need it.
+
+// ---------------- 4. DRIVE PID (linear) ----------------
+// Run TUNING_TEST = 3 and watch Y on the screen.
+//   - Set DRIVE_KD to 0. Raise DRIVE_KP until it overshoots 48 and rocks back.
+//   - Raise DRIVE_KD until it stops cleanly.
+//   - Done when it stops within 0.5" with no rocking. Leave DRIVE_KI at 0.
+// SLEW: limits how fast the speed can jump (0 = off). Raise to 5-10 if the wheels slip or the robot
+// wheelies at the start of a drive - slipping wheels are a big cause of odometry drift.
+constexpr double DRIVE_KP = 5.78;
+constexpr double DRIVE_KI = 0.0;
+constexpr double DRIVE_KD = 6.0;
+constexpr double DRIVE_SLEW = 0.0; // 0 = off. Raise to 5-10 if the wheels slip or the robot wheelies at the start of a drive.
+
+// ---------------- 5. EXIT CONDITIONS ("when is a move done?") ----------------
+// A move ends when it's within SMALL error for SMALL timeout ms, or within LARGE error for LARGE timeout ms.
+// Smaller errors / longer timeouts = more exact but slower. Tune these LAST, after the gains.
+//   - Moves stop a bit short every time: lower the small error or raise its timeout.
+//   - Moves sit and jitter at the end: raise the timeouts a little (the PID needs to settle) or re-tune KD.
+constexpr double DRIVE_ANTI_WINDUP = 0.5;          // only matters if DRIVE_KI is used, no value matters
+constexpr double DRIVE_SMALL_ERROR = 1.0;          // inches of freedom for error
+constexpr double DRIVE_SMALL_TIMEOUT = 75;         // ms
+constexpr double DRIVE_LARGE_ERROR = 2.0;          // inches
+constexpr double DRIVE_LARGE_TIMEOUT = 150;        // ms
+constexpr double TURN_ANTI_WINDUP = 0.0;            // no value matters
+constexpr double TURN_SMALL_ERROR = 1.0;           // degrees of freedom for error
+constexpr double TURN_SMALL_TIMEOUT = 50;          // ms in small error before it proceeds to next move
+constexpr double TURN_LARGE_ERROR = 2.0;           // degrees
+constexpr double TURN_LARGE_TIMEOUT = 200;         // ms
+
+// ---------------- Every run: setup habits that matter as much as tuning ----------------
+//   - Place the robot the same way every time (back flat on the wall, square to it, centered).
+//   - Don't bump the robot while the IMU calibrates.
+//   - Check the tracking wheels spin freely, touch the floor firmly, and have no side-to-side play.
+//   - Fully charged battery when tuning and competing.
+// =====================================================================
+
 // IMU
-pros::Imu imu(18);
+pros::Imu imu(IMU_PORT);
 
 // Odometry rotation sensors
-pros::Rotation horizontalEnc(13);
-pros::Rotation verticalEnc(-14);
+pros::Rotation horizontalEnc(ODOM_HORIZONTAL_PORT);
+pros::Rotation verticalEnc(ODOM_VERTICAL_PORT);
 
 lemlib::TrackingWheel horizontal(
     &horizontalEnc,
-    1.976,      // was lemlib::Omniwheel::NEW_275 (2.75 * 24 / 33.4)
-    -2.5
+    ODOM_HORIZONTAL_DIAMETER,
+    ODOM_HORIZONTAL_OFFSET
 );
 
 lemlib::TrackingWheel vertical(
     &verticalEnc,
-    1.982,      // was lemlib::Omniwheel::NEW_275 (2.75 * 48 / 66.6)
-    -0.1
+    ODOM_VERTICAL_DIAMETER,
+    ODOM_VERTICAL_OFFSET
 );
 
 // DR4B motor
@@ -224,37 +335,36 @@ int deadband(int value) {
 lemlib::Drivetrain drivetrain(
     &leftMotors,
     &rightMotors,
-    10,
-    lemlib::Omniwheel::NEW_275,
-    360,
-    2
+    DRIVE_TRACK_WIDTH,
+    lemlib::Omniwheel::NEW_275,   // drive wheel size (odometry uses the tracking wheels, not these)
+    DRIVE_WHEEL_RPM,
+    DRIVE_HORIZONTAL_DRIFT
 );
 
 // Linear PID
 lemlib::ControllerSettings linearController(
-    5.78,
-    0,
-    6,
-    0.5,
-    1,
-    75,
-    2,
-    150,
-    0       // slew: gradual speed-up so it doesn't wheelie (was 0). Higher = quicker start, lower = gentler.
-            // Only affects auton moves (driver control doesn't use this)
+    DRIVE_KP,
+    DRIVE_KI,
+    DRIVE_KD,
+    DRIVE_ANTI_WINDUP,
+    DRIVE_SMALL_ERROR,
+    DRIVE_SMALL_TIMEOUT,
+    DRIVE_LARGE_ERROR,
+    DRIVE_LARGE_TIMEOUT,
+    DRIVE_SLEW
 );
 
 // Angular PID
 lemlib::ControllerSettings angularController(
-    3.7,
-    0,
-    25.5,
-    0,
-    1,
-    50,
-    2,
-    200,
-    0
+    TURN_KP,
+    TURN_KI,
+    TURN_KD,
+    TURN_ANTI_WINDUP,
+    TURN_SMALL_ERROR,
+    TURN_SMALL_TIMEOUT,
+    TURN_LARGE_ERROR,
+    TURN_LARGE_TIMEOUT,
+    TURN_SLEW
 );
 
 // Odometry sensors
@@ -782,8 +892,121 @@ void initialize() {
     });
 }   
 
+// Tuning tests (see TUNING_TEST in the tuning block). Pose starts at 0, 0, 0 facing "up" (forward).
+void runTuningTest() {
+    chassis.setPose(0, 0, 0);
+    chassis.setBrakeMode(pros::E_MOTOR_BRAKE_BRAKE);
+
+    if (TUNING_TEST == 1) {
+        // Odometry check: nothing moves. Push the robot by hand and read the controller.
+        // V / H = raw inches each tracking wheel has rolled since the test started (no heading math),
+        // so you can check each wheel's direction and size on its own.
+        chassis.setBrakeMode(pros::E_MOTOR_BRAKE_COAST);   // easier to push by hand
+        const double vStart = vertical.getDistanceTraveled();
+        const double hStart = horizontal.getDistanceTraveled();
+        while (true) {
+            lemlib::Pose pose = chassis.getPose();
+            controller.print(0, 0, "V:%.2f H:%.2f    ",
+                             vertical.getDistanceTraveled() - vStart,
+                             horizontal.getDistanceTraveled() - hStart);
+            pros::delay(60);   // the controller only accepts one print every ~50 ms
+            controller.print(1, 0, "X%.1f Y%.1f T%.0f    ", pose.x, pose.y, pose.theta);
+            pros::delay(60);
+        }
+    } else if (TUNING_TEST == 5) {
+        // Spin test: spin slowly in place 5 full turns (by the IMU), then work out the offsets.
+        // When the robot only spins, each tracking wheel rolls (offset x angle turned), so
+        // offset = wheel distance / angle turned in radians. Set the robot in open space first.
+        constexpr double SPIN_TURNS = 5.0;
+        constexpr int SPIN_VOLTAGE = 6000;        // mV (12000 = full). Raise if it doesn't turn, lower if wheels slip
+        constexpr int SPIN_SLOW_VOLTAGE = 4000;   // mV for the last quarter turn
+        const double vStart = vertical.getDistanceTraveled();
+        const double hStart = horizontal.getDistanceTraveled();
+        const double thStart = chassis.getPose().theta;   // LemLib heading (doesn't wrap at 360)
+        const uint32_t startMs = pros::millis();
+        int printTick = 0;
+
+        // Spin clockwise by driving the motors directly (left forward, right back)
+        while (chassis.getPose().theta - thStart < SPIN_TURNS * 360.0 - 3.0
+               && pros::millis() - startMs < 30000) {
+            double turned = chassis.getPose().theta - thStart;
+            int volts = (SPIN_TURNS * 360.0 - turned < 90.0) ? SPIN_SLOW_VOLTAGE : SPIN_VOLTAGE;
+            leftMotors.move_voltage(volts);
+            rightMotors.move_voltage(-volts);
+            if (++printTick % 10 == 0) {   // live progress every 100 ms
+                controller.print(0, 0, "spinning %.0f deg   ", turned);
+            }
+            pros::delay(10);
+        }
+        leftMotors.move_voltage(0);
+        rightMotors.move_voltage(0);
+        leftMotors.brake();
+        rightMotors.brake();
+        pros::delay(1000);   // let it stop completely
+
+        const double turnedDeg = chassis.getPose().theta - thStart;
+        const double turnedRad = turnedDeg * 3.14159265358979 / 180.0;
+        const double vDist = vertical.getDistanceTraveled() - vStart;
+        const double hDist = horizontal.getDistanceTraveled() - hStart;
+        const double vOffset = std::fabs(vDist / turnedRad);
+        const double hOffset = std::fabs(hDist / turnedRad);
+        lemlib::Pose pose = chassis.getPose();
+
+        // Line 0: the offsets to copy (sign comes from where the wheel is, see step (c))
+        // Line 1: how far X / Y drifted with the CURRENT offsets (goal: both within 0.5)
+        // Line 2: how far it actually turned (should be ~1800)
+        while (true) {
+            controller.print(0, 0, "Voff %.2f Hoff %.2f ", vOffset, hOffset);
+            pros::delay(60);
+            controller.print(1, 0, "drift X%.1f Y%.1f   ", pose.x, pose.y);
+            pros::delay(60);
+            controller.print(2, 0, "turned %.0f deg   ", turnedDeg);
+            pros::delay(500);
+        }
+    } else if (TUNING_TEST == 2) {
+        // Turn test: 90 -> 0, three times. After each turn the CONTROLLER screen shows:
+        //   T90 e+1.2 640ms   = target, final error in degrees (after it stopped coasting), time the turn took
+        // If the time reads ~2000ms the turn never settled (it timed out): it was wobbling or creeping.
+        const double targets[2] = {90.0, 0.0};
+        for (int i = 0; i < 3; i++) {
+            for (double target : targets) {
+                uint32_t start = pros::millis();
+                chassis.turnToHeading(target, 2000);
+                chassis.waitUntilDone();
+                int turnMs = static_cast<int>(pros::millis() - start);
+                pros::delay(500);   // let it stop coasting so we read the REAL final angle
+                double err = chassis.getPose().theta - target;
+                controller.print(0, 0, "T%.0f e%+.1f %dms   ", target, err, turnMs);
+                pros::delay(500);
+            }
+        }
+    } else if (TUNING_TEST == 3) {
+        chassis.moveToPoint(0, 48, 3000);
+        chassis.waitUntilDone();
+        pros::delay(1500);
+        chassis.moveToPoint(0, 0, 3000, {.forwards = false});
+        chassis.waitUntilDone();
+    } else if (TUNING_TEST == 4) {
+        const double square[4][2] = {{0, 24}, {24, 24}, {24, 0}, {0, 0}};
+        for (const auto& pt : square) {
+            chassis.turnToPoint(pt[0], pt[1], 1500);
+            chassis.waitUntilDone();
+            chassis.moveToPoint(pt[0], pt[1], 2500);
+            chassis.waitUntilDone();
+        }
+        chassis.turnToHeading(0, 1500);
+        chassis.waitUntilDone();
+        // Screen should now read about X 0, Y 0, Th 0. Compare with where the robot really is.
+    }
+}
+
 // Autonomous selector (only runs when field control / a competition switch starts autonomous)
 void autonomous() {
+    if (TUNING_TEST != 0) {   // tuning mode: run the test instead of the auton
+        runTuningTest();
+        return;
+    }
+
     toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
     dr4bSlewDown = DR4B_AUTON_SLEW_DOWN;   // lift lowers a little slower in auton
