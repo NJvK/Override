@@ -413,11 +413,11 @@
             "-funwind-tables",
             "--std=gnu++23",
             "-o",
-            "bin/skillsauto.cpp.o",
-            "src\\skillsauto.cpp"
+            "bin/rw-chassis.cpp.o",
+            "src\\rw-chassis.cpp"
         ],
         "directory": "C:\\Users\\Risha\\Downloads\\robocode2\\OverrideNewRW",
-        "file": "src\\skillsauto.cpp"
+        "file": "src\\rw-chassis.cpp"
     },
     {
         "arguments": [
@@ -455,10 +455,10 @@
             "-funwind-tables",
             "--std=gnu++23",
             "-o",
-            "bin/rw-chassis.cpp.o",
-            "src\\rw-chassis.cpp"
+            "bin/skillsauto.cpp.o",
+            "src\\skillsauto.cpp"
         ],
         "directory": "C:\\Users\\Risha\\Downloads\\robocode2\\OverrideNewRW",
-        "file": "src\\rw-chassis.cpp"
+        "file": "src\\skillsauto.cpp"
     }
 ]

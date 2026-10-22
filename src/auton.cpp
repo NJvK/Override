@@ -10,9 +10,11 @@ namespace {
 // =====================================================================
 // Field coordinates are in inches, with (0, 0) at the center of the field (RW-Template's field).
 // +X = toward the right wall (the wall the robot starts on), +Y = toward the top of the field map.
-// Walls are at +-70.25 (the inside of the perimeter, RW's field_half_size). Tiles are 24", so field elements
-// sit on multiples of 24. All positions below are the IDEAL field spots (the old field-tuned offsets were
-// reset to 0): with MCL / distance resets the robot knows where it is, so the spots don't need fudging.
+// Walls are at +-70.25 (the inside of the perimeter, RW's field_half_size). Goals and pins are at RW-Template's
+// Override field spots (the same field its simulator draws): one tile = 23.55", goals at (47.09, 23.55) etc.
+// All positions below are the IDEAL field spots (the old field-tuned offsets were reset to 0): with MCL /
+// distance resets the robot knows where it is, so the spots don't need fudging. If one is off on your field,
+// tape-measure it from the walls (X = 70.25 - distance from the right wall, Y = 70.25 - distance from the top wall).
 // Headings: 0 = facing the top of the map, 90 = facing right, 180 = facing down, 270 = facing left.
 // One tile = 24 inches.
 
@@ -23,17 +25,17 @@ constexpr double AUTON_START_Y = 0;
 constexpr double AUTON_START_HEADING = 270.0;
 
 // Alliance goal (the one being scored on)
-constexpr double AUTON_GOAL_X = 48.0;
-constexpr double AUTON_GOAL_Y = 24.0;
+constexpr double AUTON_GOAL_X = 47.09;   // (was 48)
+constexpr double AUTON_GOAL_Y = 23.55;   // (was 24)
 
 // Pin + cup 1: one tile left of the goal
-constexpr double AUTON_PIN1_X = 24.0;
-constexpr double AUTON_PIN1_Y = 24.0;   // tile corner (was field-tuned to 23)
+constexpr double AUTON_PIN1_X = 23.55;   // (was 24)
+constexpr double AUTON_PIN1_Y = 23.55;   // tile corner (was 24, field-tuned to 23)
 constexpr double AUTON_PIN1_APPROACH_HEADING = 322.0;  // drives in from the lower right (stays clear of the small pin below it)
 
 // Pin + cup 2: one tile above the goal
-constexpr double AUTON_PIN2_X = 48.0;
-constexpr double AUTON_PIN2_Y = 48.0;
+constexpr double AUTON_PIN2_X = 47.09;   // (was 48)
+constexpr double AUTON_PIN2_Y = 47.09;   // (was 48)
 constexpr double AUTON_PIN2_APPROACH_HEADING = 43.0;   // drives in along the diagonal line from the lower left (stays clear of the goal)
 
 // Lift
@@ -55,7 +57,8 @@ constexpr double AUTON_CLAW_OPEN_DIST = 5.0;    // starts spinning the claw when
 constexpr int AUTON_APPROACH_CLAW_SPEED = 300;  // rpm the claw spins at while driving into a pin (keeps spinning, never stops to open).
                                                 // + = same way as R1 (closing), - = same way as R2 (opening)
 constexpr double AUTON_SLOW_DIST = 4.0;         // the last this-many inches to the pin are driven slowly
-constexpr int AUTON_SLOW_SPEED = 25;            // speed driving straight into a pin to pick it up (out of 127) (was 40)
+constexpr int AUTON_SLOW_SPEED = 35;            // speed driving straight into a pin to pick it up (out of 127) (was 25: quicker pickup.
+                                                // Lower it again if it knocks pin 2 over)
 constexpr int AUTON_CLAW_HOLD_SPEED = 60;       // slow grabbing speed (same as driver control)
 constexpr int AUTON_CLAW_OPEN_MS = 300;         // how long the claw spins backward to open
 constexpr int AUTON_CLAW_FAST_MS = 1000;        // claw squeezes at full speed this long after closing, then drops to the slow speed
@@ -89,9 +92,12 @@ constexpr double AUTON_TOGGLE_GEAR_RATIO = 2.0;     // motor turns per toggle tu
 constexpr int AUTON_TOGGLE_SPEED = 200;             // motor rpm (same direction as holding A in driver control)
 constexpr int AUTON_TOGGLE_TIMEOUT_MS = 2500;       // the toggle is switched off after this, in case it gets stuck
 constexpr double AUTON_TOGGLE_START_LIFT = 8.0;     // degrees: toggle starts spinning once the lift is this high (doesn't wait for the full lift). Was 15, lower = starts sooner
-// The robot waits only AUTON_TOGGLE_HEAD_START_MS after the toggle starts spinning, then starts turning to the goal.
-// The toggle still finishes its 2 turns exactly on its own and stops there.
-constexpr int AUTON_TOGGLE_HEAD_START_MS = 300;     // short wait before driving off so it gets both toggles (raise if it still only gets one)
+// The robot waits until the toggle is AUTON_TOGGLE_FINISH_DEG from done (it used to leave after a 300 ms head start
+// and turn against the wall), then drives straight forward AUTON_START_FORWARD before turning to the goal,
+// so the back corners can't hit the wall when it turns (same as skills).
+constexpr double AUTON_TOGGLE_FINISH_DEG = 10.0;    // motor degrees
+constexpr double AUTON_START_FORWARD = 11.88 - 9.0 + 1.0;   // 3.9": corner swing (11.88) - center to back (9) + 1" spare
+constexpr int AUTON_START_FORWARD_SPEED = 70;
 
 // Preload (scored first, right after the toggles)
 constexpr double AUTON_PRELOAD_CARRY_HEIGHT = 100.0; // degrees: lift rises to this (from 30) while driving to the goal with the preload
@@ -123,14 +129,14 @@ constexpr double AUTON_PIN1_SCORE_TURN_LESS = 0.0;    // (was field-tuned to 2)
 constexpr double AUTON_PIN1_SCORE_EXTRA_DIST = 0.0;   // (was field-tuned to -1)
 
 constexpr double AUTON_PIN2_GRAB_TURN_OFFSET = 0.0;   // (was field-tuned to 8)
-constexpr double AUTON_PIN1_SLOW_DIST = 6.0;          // inches before the grab spot where it switches to slow (was 3, same as pin 2 now)
+constexpr double AUTON_PIN1_SLOW_DIST = 3.5;          // inches before the grab spot where it switches to slow (was 6: shorter slow part = quicker pickup)
 constexpr int AUTON_PIN1_APPROACH_SPEED = 70;         // top speed driving up to pin 1 (out of 127). Was full speed (127). Lower = slower
-constexpr int AUTON_PIN1_SLOW_SPEED = 20;             // speed for the last slow inches into pin 1 (out of 127). Was AUTON_SLOW_SPEED (30)
+constexpr int AUTON_PIN1_SLOW_SPEED = 35;             // speed for the last slow inches into pin 1 (out of 127) (was 20: quicker pickup. Lower it if it knocks pin 1 over)
 constexpr double AUTON_PIN1_LOWER_SPEED = 480.0;      // degrees/second the lift lowers at after scoring pin 1 (slightly slower than the normal auton 560)
 constexpr double AUTON_PIN2_LIFT_BEFORE_TURN = 50.0;  // degrees: after grabbing pin 2, the lift gets this high before the robot turns to the goal,
                                                       // then keeps going up to scoring height while it turns. 0 = turn and lift at the same time
-constexpr double AUTON_PIN2_SLOW_DIST = 6.0;          // starts slow earlier for pin 2 (it was still knocking it over)
-constexpr int AUTON_PIN2_EXTRA_CLAW_MS = 400;         // claw keeps spinning at full speed this much longer on pin 2 before the lift goes up (pin 1 = 0)
+constexpr double AUTON_PIN2_SLOW_DIST = 3.5;          // slow part for pin 2 (was 6: shorter = quicker pickup. Raise back toward 6 if it knocks the pin over)
+constexpr int AUTON_PIN2_EXTRA_CLAW_MS = 150;         // claw keeps spinning at full speed this much longer on pin 2 before the lift goes up (pin 1 = 0) (was 400)
 constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = 0.0;
 constexpr double AUTON_PIN2_SCORE_TURN_LESS = 0.0;    // not tested yet
 constexpr double AUTON_PIN2_SCORE_EXTRA_DIST = 0.0;   // not tested yet
@@ -473,7 +479,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist, double 
     // Turn toward the goal, adjusted by turnLessDeg (the claw drops to the slow speed during this turn)
     Pose startPose = chassis.getPose();
     double headingToGoal = std::atan2(AUTON_GOAL_X - startPose.x, AUTON_GOAL_Y - startPose.y) * 180.0 / PI;
-    double turn = std::fmod(headingToGoal - startPose.theta + 540.0, 360.0) - 180.0;   // -180 to 180
+    double turn = std::remainder(headingToGoal - startPose.theta, 360.0);   // -180 to 180 (works for any heading)
     turn -= (turn >= 0 ? turnLessDeg : -turnLessDeg);
     double aimHeading = startPose.theta + turn;
 
@@ -551,7 +557,7 @@ void autonScorePreload() {
     // Turn toward the goal, but AUTON_PRELOAD_TURN_LESS_DEG less than straight at it
     Pose startPose = chassis.getPose();
     double headingToGoal = std::atan2(AUTON_GOAL_X - startPose.x, AUTON_GOAL_Y - startPose.y) * 180.0 / PI;
-    double turn = std::fmod(headingToGoal - startPose.theta + 540.0, 360.0) - 180.0;   // -180 to 180
+    double turn = std::remainder(headingToGoal - startPose.theta, 360.0);   // -180 to 180 (works for any heading)
     if (std::fabs(turn) > AUTON_PRELOAD_TURN_LESS_DEG) {
         turn -= (turn > 0 ? AUTON_PRELOAD_TURN_LESS_DEG : -AUTON_PRELOAD_TURN_LESS_DEG);
     } else {
@@ -652,14 +658,20 @@ void twoPinAlliance() {
     // off after AUTON_TOGGLE_TIMEOUT_MS.
     autonToggleStopAtMs = pros::millis() + AUTON_TOGGLE_TIMEOUT_MS;
 
-    // Short head start for the toggle before the robot drives off
+    // Wait for the toggle to (nearly) finish, then drive straight off the wall before turning
+    // (turning right at the wall swung a back corner into it)
     {
-        uint32_t headStart = pros::millis();
-        while (pros::millis() - headStart < static_cast<uint32_t>(AUTON_TOGGLE_HEAD_START_MS)) {
+        uint32_t toggleStart = pros::millis();
+        while (std::fabs(toggleMechanism.get_position() - toggleTargetDeg) > AUTON_TOGGLE_FINISH_DEG
+               && pros::millis() - toggleStart < static_cast<uint32_t>(AUTON_TOGGLE_TIMEOUT_MS)) {
             autonTick();
             pros::delay(10);
         }
     }
+    autonSetLift(AUTON_PRELOAD_CARRY_HEIGHT);
+    autonDriveStraight(AUTON_START_X + AUTON_START_FORWARD * std::sin(AUTON_START_HEADING * PI / 180.0),
+                       AUTON_START_Y + AUTON_START_FORWARD * std::cos(AUTON_START_HEADING * PI / 180.0),
+                       AUTON_START_HEADING, AUTON_START_FORWARD_SPEED, 800);
 
     // Lift goes straight from 30 up to the preload carry height now, while the robot turns
     // toward the goal (it used to wait until the turn was finished)
