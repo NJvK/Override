@@ -4,14 +4,14 @@
 // in main.cpp; this file only tells auton.cpp they exist.
 
 #include "main.h"            // all the PROS devices
-#include "lemlib/api.hpp"
+#include "rw-chassis.hpp"     // RW-Template + the chassis the autons drive with (replaces lemlib/api.hpp)
 
 #include <algorithm>          // std::max / std::min
 #include <cmath>
 #include <cstdint>
 
-// Devices (ports are set in main.cpp)
-extern lemlib::Chassis chassis;
+// Devices (ports are set in main.cpp; the drive, IMU and tracking wheels are in src/rw-config.cpp)
+// (chassis is declared in rw-chassis.hpp)
 extern pros::Motor claw;
 extern pros::Motor toggleMechanism;
 extern pros::MotorGroup DR4B;
@@ -81,7 +81,9 @@ extern double dr4bSlewDown;   // top speed (degrees/second) the lift PID lowers 
 double getDR4BPosition();
 double getStackHeight(GoalType goal, int count);
 
-// Autonomous routines. Call one of these from autonomous() in main.cpp.
-void twoPinAlliance();    // auton.cpp:       preload + 2 pins (right wall)
-void mirrorAlliance();    // autonmirror.cpp: 3-pin route, right wall or top wall (AUTON_START_ON_TOP in that file)
-void manyPinAlliance();   // skillsauto.cpp:  same 3-pin route, or the 1-minute skills run if AUTON_RUN_SKILLS is true there
+// Autonomous routines. They're on the brain screen's auton selector (runPreAutonomous() in src/rw-user.cpp).
+void twoPinAlliance();       // auton.cpp:       preload + 2 pins (right wall)
+void mirrorAlliance();       // autonmirror.cpp: 3-pin route, right wall or top wall (AUTON_START_ON_TOP in that file)
+void mirrorAllianceRight();  // autonmirror.cpp: 3-pin route from the right wall
+void mirrorAllianceTop();    // autonmirror.cpp: 3-pin route from the top wall
+void manyPinAlliance();      // skillsauto.cpp:  the 1-minute skills run

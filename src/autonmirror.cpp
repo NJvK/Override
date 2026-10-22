@@ -9,14 +9,17 @@ namespace {
 // =====================================================================
 //              AUTON: 2 PINS ON THE ALLIANCE GOAL (tuning)
 // =====================================================================
-// Field coordinates are in inches, with (0, 0) at the center of the field.
+// Field coordinates are in inches, with (0, 0) at the center of the field (RW-Template's field).
 // +X = toward the right wall (the wall the robot starts on), +Y = toward the top of the field map.
+// Walls are at +-70.25 (the inside of the perimeter, RW's field_half_size). Tiles are 24", so field elements
+// sit on multiples of 24. All positions below are the IDEAL field spots (the old field-tuned offsets were
+// reset to 0): with MCL / distance resets the robot knows where it is, so the spots don't need fudging.
 // Headings: 0 = facing the top of the map, 90 = facing right, 180 = facing down, 270 = facing left.
 // One tile = 24 inches.
 
 // Start: back of the robot against the right wall, in the middle of the wall, claw facing into the field.
-// The robot is 18" long, so its center is 9" off the wall (wall is at X = 72).
-constexpr double AUTON_START_X = 62.0;
+// The robot is 18" long, so its center is 9" off the wall (wall is at X = 70.25).
+constexpr double AUTON_START_X = 70.25 - 9.0;   // 61.25 (was field-tuned to 62)
 constexpr double AUTON_START_Y = 0;
 constexpr double AUTON_START_HEADING = 270.0;
 
@@ -26,7 +29,7 @@ constexpr double AUTON_GOAL_Y = 24.0;
 
 // Pin + cup 1: one tile left of the goal
 constexpr double AUTON_PIN1_X = 24.0;
-constexpr double AUTON_PIN1_Y = 23.0;
+constexpr double AUTON_PIN1_Y = 24.0;   // tile corner (was field-tuned to 23)
 constexpr double AUTON_PIN1_APPROACH_HEADING = 322.0;  // drives in from the lower right (stays clear of the small pin below it)
 
 // Pin + cup 2: one tile above the goal
@@ -91,8 +94,8 @@ constexpr double AUTON_PRELOAD_DROP_HEIGHT = 10.0;  // degrees: lift lowers to t
 constexpr int AUTON_PRELOAD_CLAW_OPEN_MS = 500;     // claw opens longer for the preload than for pins (AUTON_CLAW_OPEN_MS)
 // Turns this many degrees LESS than straight at the goal for the preload, then drives straight.
 // Raise it if it still turns too far, lower it (or go negative) if it doesn't turn enough.
-constexpr double AUTON_PRELOAD_EXTRA_DIST = -2.0;      // inches. + = drives further toward the goal, - = stops shorter (was -3, now 1" further)
-constexpr double AUTON_PRELOAD_TURN_LESS_DEG = -6.8;   // negative = turns that many degrees MORE than straight at the goal (was -4.8, now 2 more)
+constexpr double AUTON_PRELOAD_EXTRA_DIST = 0.0;       // inches. + = drives further toward the goal, - = stops shorter (was field-tuned to -2)
+constexpr double AUTON_PRELOAD_TURN_LESS_DEG = 0.0;    // negative = turns that many degrees MORE than straight at the goal (was field-tuned to -6.8)
 constexpr double AUTON_PRELOAD_BACKUP = 10.0;       // inches it backs away from the goal after letting go (was 8, +2" more)
 
 // Which stack spot each pin goes on (picks the height from ALLIANCE_HEIGHTS).
@@ -107,18 +110,18 @@ constexpr int AUTON_PIN2_STACK = 3;
 // GRAB_EXTRA_DIST:  inches. + = drives FURTHER forward into the pin when grabbing, - = stops shorter
 // SCORE_TURN_LESS:  degrees. + = turns LESS toward the goal than straight at it, - = turns MORE (same idea as the preload)
 // SCORE_EXTRA_DIST: inches. + = drives FURTHER toward the goal when scoring (it was stopping short), - = stops shorter
-constexpr double AUTON_PIN1_GRAB_TURN_OFFSET = 3.0;   // was 5, turned about 2 degrees too far right
-constexpr double AUTON_PIN1_GRAB_EXTRA_DIST = 2.0;    // was 5: the straight slow drive now actually reaches its spot, so 3" less
-constexpr double AUTON_PIN1_SCORE_TURN_LESS = 2.0;    // was turning about 2 degrees too far
-constexpr double AUTON_PIN1_SCORE_EXTRA_DIST = -1.0;  // was 3, now 4" less into the goal
+constexpr double AUTON_PIN1_GRAB_TURN_OFFSET = 0.0;   // (was field-tuned to 3)
+constexpr double AUTON_PIN1_GRAB_EXTRA_DIST = 0.0;    // (was field-tuned to 2)
+constexpr double AUTON_PIN1_SCORE_TURN_LESS = 0.0;    // (was field-tuned to 2)
+constexpr double AUTON_PIN1_SCORE_EXTRA_DIST = 0.0;   // (was field-tuned to -1)
 
-constexpr double AUTON_PIN2_GRAB_TURN_OFFSET = 8.0;   // was 5, now 3 degrees more right
+constexpr double AUTON_PIN2_GRAB_TURN_OFFSET = 0.0;   // (was field-tuned to 8)
 constexpr double AUTON_PIN1_SLOW_DIST = 6.0;          // inches before the grab spot where it switches to slow (was 3, same as pin 2 now)
 constexpr int AUTON_PIN1_APPROACH_SPEED = 70;         // top speed driving up to pin 1 (out of 127). Was full speed (127). Lower = slower
 constexpr int AUTON_PIN1_SLOW_SPEED = 20;             // speed for the last slow inches into pin 1 (out of 127). Was AUTON_SLOW_SPEED (30)
 constexpr double AUTON_PIN2_SLOW_DIST = 6.0;          // starts slow earlier for pin 2 (it was still knocking it over)
 constexpr int AUTON_PIN2_EXTRA_CLAW_MS = 400;         // claw keeps spinning at full speed this much longer on pin 2 before the lift goes up (pin 1 = 0)
-constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = 0.0;    // was 3: 3" less, same reason as pin 1
+constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = 0.0;
 constexpr double AUTON_PIN2_SCORE_TURN_LESS = 0.0;    // not tested yet
 constexpr double AUTON_PIN2_SCORE_EXTRA_DIST = 0.0;   // not tested yet
 
@@ -168,7 +171,7 @@ constexpr bool AUTON_START_ON_TOP = false;
 
 // Start: back of the robot against the TOP wall, in the middle of the wall, claw facing down into the field.
 constexpr double TOP_START_X = 0.0;            // right side: AUTON_START_Y (0)
-constexpr double TOP_START_Y = 62.0;           // right side: AUTON_START_X (62)
+constexpr double TOP_START_Y = 70.25 - 9.0;    // 61.25, right side: AUTON_START_X (was field-tuned to 62)
 constexpr double TOP_START_HEADING = 180.0;    // 90 - 270 = facing down
 
 // The other alliance goal (one tile left of the right-side goal, one tile higher)
@@ -176,7 +179,7 @@ constexpr double TOP_GOAL_X = 24.0;            // right side goal was (48, 24)
 constexpr double TOP_GOAL_Y = 48.0;
 
 // Pin + cup 1: one tile BELOW this goal (it's the same pin as right-side pin 1, it sits on the diagonal)
-constexpr double TOP_PIN1_X = 23.0;            // right side (24, 23) flipped
+constexpr double TOP_PIN1_X = 24.0;            // right side (24, 24) flipped (was field-tuned to 23)
 constexpr double TOP_PIN1_Y = 24.0;
 constexpr double TOP_PIN1_APPROACH_HEADING = 128.0;   // 90 - 322: drives in from the upper left
 
@@ -186,16 +189,16 @@ constexpr double TOP_PIN2_Y = 48.0;
 constexpr double TOP_PIN2_APPROACH_HEADING = 47.0;    // 90 - 43: drives in along the diagonal from the lower left
 
 // Preload (same meaning as AUTON_PRELOAD_TURN_LESS_DEG / AUTON_PRELOAD_EXTRA_DIST)
-constexpr double TOP_PRELOAD_TURN_LESS_DEG = -6.8;
-constexpr double TOP_PRELOAD_EXTRA_DIST = -2.0;
+constexpr double TOP_PRELOAD_TURN_LESS_DEG = 0.0;   // (was field-tuned to -6.8)
+constexpr double TOP_PRELOAD_EXTRA_DIST = 0.0;      // (was field-tuned to -2)
 
 // Per-pin offsets (same meaning as the AUTON_PIN... offsets: + grab turn = more RIGHT)
-constexpr double TOP_PIN1_GRAB_TURN_OFFSET = -3.0;    // right side +3 (right) -> -3 (left) when flipped
-constexpr double TOP_PIN1_GRAB_EXTRA_DIST = 2.0;
-constexpr double TOP_PIN1_SCORE_TURN_LESS = 2.0;
-constexpr double TOP_PIN1_SCORE_EXTRA_DIST = -1.0;
+constexpr double TOP_PIN1_GRAB_TURN_OFFSET = 0.0;     // (was field-tuned to -3)
+constexpr double TOP_PIN1_GRAB_EXTRA_DIST = 0.0;      // (was field-tuned to 2)
+constexpr double TOP_PIN1_SCORE_TURN_LESS = 0.0;      // (was field-tuned to 2)
+constexpr double TOP_PIN1_SCORE_EXTRA_DIST = 0.0;     // (was field-tuned to -1)
 
-constexpr double TOP_PIN2_GRAB_TURN_OFFSET = -8.0;    // right side +8 -> -8 when flipped
+constexpr double TOP_PIN2_GRAB_TURN_OFFSET = 0.0;     // (was field-tuned to -8)
 constexpr double TOP_PIN2_GRAB_EXTRA_DIST = 0.0;
 constexpr double TOP_PIN2_SCORE_TURN_LESS = 0.0;
 constexpr double TOP_PIN2_SCORE_EXTRA_DIST = 0.0;
@@ -390,14 +393,14 @@ void autonCloseClawAndLift(int extraSpinMs) {
 // Drives straight forward along `heading` with both sides at the same speed (no turning at all)
 // until it has gone far enough to reach (targetX, targetY), then stops.
 void autonDriveStraight(double targetX, double targetY, double heading, int speed, uint32_t timeoutMs) {
-    lemlib::Pose start = chassis.getPose();
+    Pose start = chassis.getPose();
     double hx = std::sin(heading * PI / 180.0);
     double hy = std::cos(heading * PI / 180.0);
     double total = (targetX - start.x) * hx + (targetY - start.y) * hy;   // distance to go along the heading
 
     uint32_t t0 = pros::millis();
     while (pros::millis() - t0 < timeoutMs) {
-        lemlib::Pose p = chassis.getPose();
+        Pose p = chassis.getPose();
         double done = (p.x - start.x) * hx + (p.y - start.y) * hy;
         if (done >= total - 0.25) break;
         chassis.tank(speed, speed, true);
@@ -449,7 +452,7 @@ void autonGrabPin(double pinX, double pinY, double approachHeading, double turnO
     bool clawSpinning = false;
     while (chassis.isInMotion()) {
         if (!clawSpinning
-            && chassis.getPose().distance(lemlib::Pose(grabX, grabY)) <= AUTON_CLAW_OPEN_DIST) {
+            && chassis.getPose().distance(Pose(grabX, grabY)) <= AUTON_CLAW_OPEN_DIST) {
             autonClawStopAtMs = 0;   // cancel any leftover open/slow timers so nothing stops the spin
             autonClawSlowAtMs = 0;
             claw.move_velocity(AUTON_APPROACH_CLAW_SPEED);
@@ -496,7 +499,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
     }
 
     // Turn toward the goal, adjusted by turnLessDeg (the claw drops to the slow speed during this turn)
-    lemlib::Pose startPose = chassis.getPose();
+    Pose startPose = chassis.getPose();
     double headingToGoal = std::atan2(autonGoalX - startPose.x, autonGoalY - startPose.y) * 180.0 / PI;
     double turn = std::fmod(headingToGoal - startPose.theta + 540.0, 360.0) - 180.0;   // -180 to 180
     turn -= (turn >= 0 ? turnLessDeg : -turnLessDeg);
@@ -506,7 +509,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
     autonWaitMotion();
 
     // Drive straight along the aim heading
-    lemlib::Pose pose = chassis.getPose();
+    Pose pose = chassis.getPose();
     double dist = std::hypot(autonGoalX - pose.x, autonGoalY - pose.y);
     double ux = std::sin(aimHeading * PI / 180.0);
     double uy = std::cos(aimHeading * PI / 180.0);
@@ -538,7 +541,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
 
     // Make sure it really got all the way to the goal before letting go
     {
-        lemlib::Pose now = chassis.getPose();
+        Pose now = chassis.getPose();
         double shortBy = (scoreX - now.x) * ux + (scoreY - now.y) * uy;   // inches still to go along the aim heading
         if (shortBy > AUTON_SCORE_FINISH_TOLERANCE) {
             autonWaitLift(height, 800);   // only waits if the lift isn't up yet, so the pin clears the goal
@@ -569,7 +572,7 @@ void autonScore(int stackPosition, double turnLessDeg, double extraDist) {
 // turnLessDeg / extraDist: same as AUTON_PRELOAD_TURN_LESS_DEG / AUTON_PRELOAD_EXTRA_DIST (or the TOP_ versions)
 void autonScorePreload(double turnLessDeg, double extraDist) {
     // Turn toward the goal, but turnLessDeg less than straight at it
-    lemlib::Pose startPose = chassis.getPose();
+    Pose startPose = chassis.getPose();
     double headingToGoal = std::atan2(autonGoalX - startPose.x, autonGoalY - startPose.y) * 180.0 / PI;
     double turn = std::fmod(headingToGoal - startPose.theta + 540.0, 360.0) - 180.0;   // -180 to 180
     if (std::fabs(turn) > turnLessDeg) {
@@ -583,7 +586,7 @@ void autonScorePreload(double turnLessDeg, double extraDist) {
     autonWaitMotion();
 
     // Drive straight along that heading, stopping when the claw is as far out as the goal
-    lemlib::Pose pose = chassis.getPose();
+    Pose pose = chassis.getPose();
     double dist = std::hypot(autonGoalX - pose.x, autonGoalY - pose.y);
     double ux = std::sin(aimHeading * PI / 180.0);
     double uy = std::cos(aimHeading * PI / 180.0);
@@ -638,6 +641,7 @@ void runThreePinRoute(const AutonRoute& r) {
 
     chassis.setPose(r.startX, r.startY, r.startHeading);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_BRAKE);   // driver control sets it back to coast
+    localizeWithWalls();   // distance sensors check the start spot (only if use_distance_resets is on)
 
     autonClawSlowAtMs = 0;
     autonClawStopAtMs = 0;
@@ -724,7 +728,16 @@ const AutonRoute TOP_ROUTE = {
 
 }  // namespace
 
-// Called from autonomous() in main.cpp. Picks the route with AUTON_START_ON_TOP.
+// Picks the route with AUTON_START_ON_TOP.
 void mirrorAlliance() {
     runThreePinRoute(AUTON_START_ON_TOP ? TOP_ROUTE : RIGHT_ROUTE);
+}
+
+// The two routes as their own entries on the auton selector
+void mirrorAllianceRight() {
+    runThreePinRoute(RIGHT_ROUTE);
+}
+
+void mirrorAllianceTop() {
+    runThreePinRoute(TOP_ROUTE);
 }

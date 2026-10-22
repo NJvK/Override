@@ -24,22 +24,19 @@ USE_PACKAGE:=1
 EXCLUDE_COLD_LIBRARIES:= 
 
 # Set this to 1 to add additional rules to compile your project as a PROS library template
-IS_LIBRARY:=1
-LIBNAME:=LemLib
-VERSION:=0.5.6
+# (0: this is a robot program, not a library. It was 1 with LIBNAME LemLib from the old LemLib project)
+IS_LIBRARY:=0
+LIBNAME:=libbest
+VERSION:=1.0.0
 
 # EXCLUDE_SRC_FROM_LIB= $(SRCDIR)/unpublishedfile.c
-# this line keeps our robot code (every file directly in src/, not the LemLib code in src/lemlib/)
-# out of the LemLib library. It then goes in the hot package, which starts after the PROS kernel is
-# running. In the library (cold package) its motors/sensors/controller get set up before the kernel
-# has started, and driver control doesn't respond.
-EXCLUDE_SRC_FROM_LIB+=$(foreach ext,$(CEXTS) $(CXXEXTS),$(wildcard $(SRCDIR)/*.$(ext)))
+# this line excludes opcontrol.c and similar files
+EXCLUDE_SRC_FROM_LIB+=$(foreach file, $(SRCDIR)/main,$(foreach cext,$(CEXTS),$(file).$(cext)) $(foreach cxxext,$(CXXEXTS),$(file).$(cxxext)))
 
 # files that get distributed to every user (beyond your source archive) - add
 # whatever files you want here. This line is configured to add all header files
 # that are in the the include directory get exported
-
-TEMPLATE_FILES=$(INCDIR)/lemlib/*.hpp $(INCDIR)/lemlib/logger/*.hpp $(INCDIR)/lemlib/chassis/*.hpp $(INCDIR)/fmt/*.h $(INCDIR)/fmt/LICENSE $(FWDIR)/hot-cold-asset.mk $(ROOT)/static/example.txt $(INCDIR)/lemlib/LICENSE $(INCDIR)/lemlib/README.md $(INCDIR)/lemlib/VERSION
+TEMPLATE_FILES=$(INCDIR)/**/*.h $(INCDIR)/**/*.hpp
 
 .DEFAULT_GOAL=quick
 
