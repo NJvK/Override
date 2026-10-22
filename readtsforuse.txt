@@ -1,0 +1,25 @@
+go to Migration.MD for detailed stuff
+for sim: windows wsl is needed, mac idk
+
+Here are the names of each auton and their usage:
+  addAuton("Skills", manyPinAlliance);               // skillsauto.cpp: 1-minute skills run
+  addAuton("Qual 2-Pin R", twoPinAlliance);          // auton.cpp: preload + 2 pins, right wall
+  addAuton("Qual Mirror R", mirrorAllianceRight);    // autonmirror.cpp: 3-pin route, right wall
+  addAuton("Qual Mirror Top", mirrorAllianceTop);    // autonmirror.cpp: 3-pin route, top wall
+  addAuton("Tuning Test", exampleAuton);             // drive + turn PID
+  addAuton("Odom Test", exampleAuton2);              // drives a few points and back
+  addAuton("Odom Check", odomCheckAuton);            // push by hand, read X / Y / heading
+  addAuton("Square Test", squareTestAuton);          // 24" square, should end at 0, 0, 0
+  addAuton("Sensor Check", sensorCheckAuton);        // distance sensors, resets, MCL
+  addAuton("IMU Scale", imuScaleAuton);              // measure imu_scale
+  addAuton("Drive Calibration", calibrateDrive);     // for the simulator (see the docs: Simulator > Calibrating)
+
+  These names are needed for running the sim. Skills and Qual Mirror Top have already been built in sim/out.
+  How to use the sim: sh sim/run-sim.sh "AUTON_NAME" --start -61.25,0,90 --time 60 --size 18
+  Replace "AUTON_NAME" with any of the options listed above. Replace time with whatever second amount needed (60 skills, 15 qual)
+  Once you run the command, it will take a minute to build and will  output a .html file with the auton name in sim/out.
+  The final offset it lists right now is not accurate, just an estimation and does not account for our actual robot's performance.
+
+  As of 10/21, skills auton has been completed and qual auton is yet to be optimized for time.
+  Make sure you're building and uploading from the right directory (OverrideNewRW) or you will upload the Lemlib project instead
+  
