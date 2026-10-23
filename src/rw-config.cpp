@@ -13,7 +13,8 @@ pros::Controller controller_1(pros::E_CONTROLLER_MASTER);
 // Drive encoder readings come from the FIRST motor in each group, so with mixed motors
 // list an 11W motor first and set wheel_distance_in for that motor's gearing.
 // (same ports and directions as leftMotors / rightMotors in main.cpp)
-pros::MotorGroup left_chassis({-1, -11, -12}, pros::MotorGearset::blue);
+// Port 1 read 1/3 of the distance in Odom Check (L 7.7 for a 24" push), so it isn't first: RW reads the first motor
+pros::MotorGroup left_chassis({-11, -1, -12}, pros::MotorGearset::blue);
 pros::MotorGroup right_chassis({19, 10, 20}, pros::MotorGearset::blue);
 // X-drive, mecanum or H-drive: see the docs (Guide > Drive Types) for the motors to make here and
 // the line to add to runPreAutonomous() in src/rw-user.cpp
@@ -24,15 +25,15 @@ pros::Imu inertial_sensor(17);   // IMU_PORT in main.cpp
 // Same ports/directions as ODOM_HORIZONTAL_PORT / ODOM_VERTICAL_PORT in main.cpp.
 // RW may count directions differently from LemLib: run "Odom Test" (or push the robot by hand) and check
 // that pushing forward raises Y and pushing to the robot's right raises X. If one goes the wrong way, flip that sign.
-pros::Rotation horizontal_tracker(13);
+pros::Rotation horizontal_tracker(-13);
 pros::Rotation vertical_tracker(-14);
 
 // Distance sensors for MCL and distance resets, one facing each way. TODO: set the real ports when they're
 // mounted (see LOCALIZATION below). For now they're on FREE ports so they can't clash with anything.
 // (Ports in use: 1, 2, 3, 4, 5, 7, 9, 10, 11, 12, 13, 14, 17, 19, 20. Free: 6, 8, 15, 16, 18, 21.)
 pros::Distance front_sensor(6);
-pros::Distance left_sensor(8);
-pros::Distance right_sensor(15);
+pros::Distance left_sensor(15);
+pros::Distance right_sensor(18);
 pros::Distance back_sensor(16);
 
 // The rest of the robot (lift, claw, toggle, optical sensor) is in src/main.cpp, same as before.
@@ -48,7 +49,8 @@ double distance_between_wheels = 12.625;   // DRIVE_TRACK_WIDTH in main.cpp (12 
 // motor to wheel gear ratio * wheel diameter (in inches) * pi
 // (X-drive: also * 0.707, see the docs: Guide > Drive Types)
 // 600 rpm (blue) motors geared to 450 rpm at the wheel (DRIVE_WHEEL_RPM = 450) = 36:48, 2.75" drive wheels
-double wheel_distance_in = (36.0 / 48.0) * 2.75 * M_PI;
+// * 24 / 23.6: a 24" push read L 23.7 / R 23.5 in Odom Check, so the encoders counted 1.7% short
+double wheel_distance_in = (36.0 / 48.0) * 2.75 * M_PI * (24.0 / 23.6);
 
 // PID Constants for movement
 // distance_* : Linear PID for straight driving
@@ -59,10 +61,15 @@ double wheel_distance_in = (36.0 / 48.0) * 2.75 * M_PI;
 //   drive: kP 5.78 -> 0.55, kI 0 -> 0, kD 6.0 -> 0.57      turn: kP 3.7 -> 0.35, kI 0 -> 0, kD 25.5 -> 2.41
 // They're a starting point, not final: RW's loop isn't identical to LemLib's, so check them with "Tuning Test".
 // (RW's own defaults were drive 1.1 / 0.1 / 7 and turn 0.3 / 0 / 2.5 if these feel too soft.)
-double distance_kp = 0.55, distance_ki = 0, distance_kd = 0.57;
+// Tuning Test on the robot: kp 0.55 / kd 0.57 stalled short both ways (forward 58.69, back 57.73); kp 1.1 / kd 0.57
+// overshot forward (60.7-61.6) and still stalled 1.5" short going back (58.5, RW's "close enough" limit).
+// More kp pushes through that last 1.5", more kd brakes the overshoot. kd 8 made it jerk when stopping, so 5
+// (59.8 / 59.8 in the simulator). (ki doesn't help here: RW's integral builds over the whole drive and just adds a constant push)
+double distance_kp = 2.0, distance_ki = 0, distance_kd = 5;
 double turn_kp = 0.35, turn_ki = 0, turn_kd = 2.41;
-// (no LemLib equivalent: RW's default, keeps the robot straight while driving)
-double heading_correction_kp = 0.6, heading_correction_ki = 0, heading_correction_kd = 4;
+// (no LemLib equivalent: keeps the robot straight while driving)
+// kp 0.6 (RW's default) only asked for ~0.4 V at 0.7 deg off: Tuning Test kept ending 0.2-0.9 deg off with X 1-3" left
+double heading_correction_kp = 1.2, heading_correction_ki = 0, heading_correction_kd = 4;
 
 // Enable or disable the use of tracking wheels
 bool using_horizontal_tracker = true;   // horizontal tracking wheel on port 13
@@ -72,10 +79,10 @@ bool using_vertical_tracker = true;     // vertical tracking wheel on port 14
 // These comments are in the perspective of a top down view of the robot when the robot is facing vertical
 // Vertical distance from the center of the bot to the horizontal tracking wheel (in inches, positive is when the wheel is behind the center)
 // main.cpp ODOM_HORIZONTAL_OFFSET = -2.25 (LemLib: behind = negative). RW: behind = POSITIVE, so +2.25
-double horizontal_tracker_dist_from_center = 2.25;
+double horizontal_tracker_dist_from_center = 3.75;
 // Horizontal distance from the center of the bot to the vertical tracking wheel (in inches, positive is when the wheel is to the right of the center)
 // main.cpp ODOM_VERTICAL_OFFSET = -0.1 (left of center = negative in both LemLib and RW)
-double vertical_tracker_dist_from_center = -0.1;
+double vertical_tracker_dist_from_center = -0.4;
 double horizontal_tracker_diameter = 2.00836820084; // ODOM_HORIZONTAL_DIAMETER (tuned with the push test)
 double vertical_tracker_diameter = 2.01258746176;   // ODOM_VERTICAL_DIAMETER (tuned with the 96" push test)
 
@@ -101,8 +108,11 @@ double vertical_tracker_diameter = 2.01258746176;   // ODOM_VERTICAL_DIAMETER (t
 //      and time under a few ms (lower mcl_particles if it isn't). If the position lags while driving toward
 //      or away from a wall, adjust distance_sensor_delay_msec (further down).
 // Both are off until the sensors are on: with nothing plugged in they'd just do nothing.
-bool use_mcl = false;              // continuous correction while driving (startMcl() in src/rw-user.cpp)
-bool use_distance_resets = false;  // one-shot resets the autons do while stopped (localizeWithWalls())
+// MCL runs as the field-aware version (src/field-mcl.cpp, started in src/rw-user.cpp). RW's own startMcl() trusted
+// readings that hit goals and field pins, and in the simulator that made Skills touch a goal / the loader or miss a
+// field pin in 5 of 10 runs; the field-aware one only uses readings with nothing in the beam before the wall.
+bool use_mcl = true;               // continuous correction while driving (startFieldMcl() in src/rw-user.cpp)
+bool use_distance_resets = true;  // one-shot resets the autons do while stopped (localizeWithWalls())
 
 // Distance sensor offsets (TODO once mounted, step 2). Unused sensors can stay 0.
 // If you are not using all four distance sensors, just set the unused ones to 0
@@ -113,17 +123,17 @@ bool use_distance_resets = false;  // one-shot resets the autons do while stoppe
 // double front_sensor_offsetY = 6.5;
 // For the X offset, a negative value indicates that the sensor is located on the left side of the robot, while a positive value indicates that it is on the right side.
 
-double front_sensor_offsetX = 0.0;
-double front_sensor_offsetY = 0.0;
+double front_sensor_offsetX = 5.91;
+double front_sensor_offsetY = 6.85;
 
-double left_sensor_offsetX = 0.0;
-double left_sensor_offsetY = 0.0;
+double left_sensor_offsetX = -7.35;
+double left_sensor_offsetY = 4.0;
 
-double right_sensor_offsetX = 0.0;
-double right_sensor_offsetY = 0.0;
+double right_sensor_offsetX = 7.8;
+double right_sensor_offsetY = 3.8;
 
-double back_sensor_offsetX = 0.0;
-double back_sensor_offsetY = 0.0;
+double back_sensor_offsetX = 6.2;
+double back_sensor_offsetY = -4.4;   // reads 3.9" with the back flush on a wall: 8.3 (center to back, measured) - 3.9
 
 // ============================================================================
 // ADVANCED TUNING (OPTIONAL)
@@ -156,12 +166,14 @@ double chase_power = 2;
 // Multiplies the IMU heading. Many V5 IMUs read a little off over full turns (e.g. 357 for 360).
 // Find yours with measureImuScale(), 1.0 = no correction
 // TODO: measure with measureImuScale() once it's running on RW (an earlier spin test hinted yours may read off)
-double imu_scale = 1.0;
+double imu_scale = 1.0023;
 
 // End a motion early once the robot has been stuck (not moving or turning) for this long, in msec.
 // Saves time if the robot gets caught on something. 0 = off.
 // Leave it off for moves meant to push into something until they time out. 350 or more avoids false exits.
-double stall_exit_msec = 0;
+// 400: a safety net for Skills (nothing in the route pushes into anything with RW's moves, and 10 simulator runs
+// came out exactly the same with it on). The sweep's own drive does its own stop checks.
+double stall_exit_msec = 400;
 
 // Distance resets: skip readings where the beam hits the wall at a steeper angle than this (degrees).
 // The sensor's beam is a cone about 12 degrees wide on each side, so steep readings get less exact

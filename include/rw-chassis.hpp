@@ -75,3 +75,9 @@ extern RWChassis chassis;
 // RW checks every reading itself (beam angle, corner margin, max jump) and skips the bad ones.
 // Call it while the robot is stopped. Returns how many sensors reset the position.
 int localizeWithWalls();
+
+// Field-aware MCL (src/field-mcl.cpp): RW's particle filter, but only trusting distance readings with nothing on the
+// field in the beam before the wall. Started by runPreAutonomous() when use_mcl is on (instead of RW's startMcl()).
+void startFieldMcl();
+// Tells it a field pin at (x, y) is gone (picked up), so beams past that spot count again
+void fieldMclPinPickedUp(double x, double y);

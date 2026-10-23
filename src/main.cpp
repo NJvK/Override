@@ -38,7 +38,8 @@ constexpr float DRIVE_CURVE_GAIN = 1.019;
 //   0 = lift + goal:  "L<lift> H<hold> C<claw rpm>"  /  "ALLY A<count> N<count> <seen> AUTO|MAN"
 //   1 = optical tuning: "Hue <hue> Prox <prox>"     /  "See <A/N/-> Cf <confirm count>"
 //   2 = counters:      "Pin <pin lifts> Zero <zeroes>" / "Roll <IMU roll>"
-constexpr int CONTROLLER_READOUT = 0;
+//   3 = distance sensors, inches (-- = sees nothing): "F<front> R<right>" / "B<back> L<left>"
+constexpr int CONTROLLER_READOUT = 3;
 
 // DR4B motor
 pros::MotorGroup DR4B({-7, 2}, pros::MotorGearset::green);
@@ -303,7 +304,14 @@ constexpr double DR4B_DOWN_SPEED = -100.0;
 
 // Get rotation sensor position in degrees
 double getDR4BPosition() {
+#ifdef RW_SIM_PROS
+    // RW's simulator has no lift sensor (it reads 0 forever), so there the lift reads its motors instead
+    // (the sensor turns about 1:1 with them). Below 0 is the hard stop, so it re-zeroes there.
+    if (DR4B.get_position() < 0) DR4B.tare_position_all();
+    return DR4B.get_position();
+#else
     return dr4bRotation.get_position() / 100.0;
+#endif
 }
 
 // Save current lift position
@@ -751,6 +759,19 @@ void initialize() {
                     controller.print(2, 0, "See %c  Cf %-3d       ",
                                      seen == GOAL_ALLIANCE ? 'A' : (seen == GOAL_NEUTRAL ? 'N' : '-'), goalCandidateSeen);
                 }
+            } else if (CONTROLLER_READOUT == 3) {
+                // Raw readings times distance_sensor_scale, same numbers as the "Sensor Check" auton
+                auto inches = [](pros::Distance& sensor) {
+                    int32_t mm = sensor.get();
+                    return (mm > 0 && mm < 9999) ? mm / 25.4 * distance_sensor_scale : -1.0;
+                };
+                pros::Distance& a = secondLine ? back_sensor : front_sensor;
+                pros::Distance& b = secondLine ? left_sensor : right_sensor;
+                char textA[8], textB[8];
+                double inchesA = inches(a), inchesB = inches(b);
+                if (inchesA < 0) snprintf(textA, sizeof(textA), "--"); else snprintf(textA, sizeof(textA), "%.1f", inchesA);
+                if (inchesB < 0) snprintf(textB, sizeof(textB), "--"); else snprintf(textB, sizeof(textB), "%.1f", inchesB);
+                controller.print(secondLine ? 2 : 1, 0, "%c%-7s %c%-7s   ", secondLine ? 'B' : 'F', textA, secondLine ? 'L' : 'R', textB);
             } else if (CONTROLLER_READOUT == 2) {
                 if (!secondLine) {
                     controller.print(1, 0, "Pin %-3d Zero %-3d    ", pinLiftCount, liftZeroCount);

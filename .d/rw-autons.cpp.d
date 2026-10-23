@@ -9,7 +9,8 @@ bin/rw-autons.cpp.o: src/rw-autons.cpp include/rw-chassis.hpp \
  include/pros/rotation.h include/rw/motor-control.h \
  include/rw/path-following.h include/rw/path.h \
  include/rw/auton-selector.h include/rw/driver-control.h \
- include/rw/drive-log.h include/rw/pid.h include/rw/utils.h
+ include/rw/drive-log.h include/rw/pid.h include/rw/utils.h \
+ include/rw/hardware.h
 include/rw-chassis.hpp:
 include/rw-config.h:
 include/rw/api.h:
@@ -39,3 +40,4 @@ include/rw/driver-control.h:
 include/rw/drive-log.h:
 include/rw/pid.h:
 include/rw/utils.h:
+include/rw/hardware.h:

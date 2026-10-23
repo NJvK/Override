@@ -15,6 +15,7 @@ void odomCheckAuton();    // "Odom Check": nothing moves, push the robot and rea
 void squareTestAuton();   // "Square Test": 24" square back to the start
 void sensorCheckAuton();  // "Sensor Check": distance sensor readings, resets and MCL from the skills start
 void imuScaleAuton();     // "IMU Scale": spin the robot 10 turns by hand to measure imu_scale
+void feedforwardAuton();  // "Feedforward": measures drive_kS / kV / kA for profiled moves and path following
 
 // Called from src/main.cpp (src/rw-user.cpp)
 void runPreAutonomous();

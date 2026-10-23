@@ -1,5 +1,6 @@
 #include "rw-chassis.hpp"   // rw-config.h + localizeWithWalls()
 #include <cstdio>          // snprintf
+#include "rw/hardware.h"   // hw::screenRow (Brain screen)
 
 // Tuning and test routines. The robot's real autons are in auton.cpp, autonmirror.cpp and skillsauto.cpp.
 // IMPORTANT: Remember to add respective function declarations to include/rw-config.h
@@ -21,17 +22,39 @@ void controllerLines(const char* line1, const char* line2, const char* line3) {
  * "Tuning Test": drive and turn PID (distance_kp/kd and turn_kp/kd in src/rw-config.cpp).
  * Drives 60" and turns through a few angles. Each turn draws its PID graph on the Brain screen:
  * green line = target, red = the robot. Tune until it gets there fast with no wobble.
+ * At the end the Brain screen and controller show where it thinks it ended (should be about 0, 0, 0).
  */
 void exampleAuton() {
+  // Drive motor encoder distance (what driveTo counts), to compare with the tracking wheels (y_pos)
+  auto encoder_in = [] {
+    return (getLeftRotationDegree() + getRightRotationDegree()) / 2.0 / 360.0 * wheel_distance_in;
+  };
   setPose(0, 0, 0);
+  double enc_start = encoder_in();
   driveTo(60, 3000);
+  pros::delay(300);                 // let it finish rolling, so this is where it really stopped
+  double first_drive_y = y_pos;     // should be 60.0: shown at the end
+  double first_drive_enc = encoder_in() - enc_start;
   turnToAngle(90, 2000);
   turnToAngle(135, 2000);
   turnToAngle(150, 2000);
   turnToAngle(160, 2000);
   turnToAngle(165, 2000);
   turnToAngle(0, 2000);
+  double before_back_y = y_pos;     // where it starts the drive back (the turns can move it a little)
+  double before_back_enc = encoder_in();
   driveTo(-60, 3000);
+  pros::delay(300);
+  double back_enc = before_back_enc - encoder_in();
+  char line1[32], line2[32];
+  snprintf(line1, sizeof(line1), "X %.2f Y %.2f", x_pos, y_pos);
+  snprintf(line2, sizeof(line2), "H %.1f", getInertialHeading());
+  hw::screenRow(1, "TUNING DONE (should be about 0, 0, 0)");
+  hw::screenRow(2, "%s  %s", line1, line2);
+  hw::screenRow(3, "Forward 60: went %.2f   Back 60: went %.2f", first_drive_y, before_back_y - y_pos);
+  hw::screenRow(4, "Turns moved Y by %.2f", before_back_y - first_drive_y);
+  hw::screenRow(5, "Drive motors counted: fwd %.2f  back %.2f", first_drive_enc, back_enc);
+  while (true) controllerLines("TUNING DONE", line1, line2);
 }
 
 /*
@@ -52,23 +75,36 @@ void exampleAuton2() {
 /*
  * "Odom Check": nothing moves. Push the robot by hand and read the controller:
  *   forward -> Y goes up, to its right -> X goes up, clockwise -> heading goes up.
+ *   L / R = inches the drive motors have counted (what driveTo uses). Push it forward 24": both should read
+ *   about 24. One stuck at 0 = the first motor in that group (port 1 left, 19 right) isn't reporting.
+ *   Top line = each left motor's inches, in left_chassis order (a half motor reads about 1/3 of a blue one).
  * If X or Y goes the wrong way, flip that tracking wheel's port sign in src/rw-config.cpp.
  * Push it 96" along a wall to check the tracking wheel diameters (Y should read 96.0).
  */
 void odomCheckAuton() {
   setPose(0, 0, 0);
   stopChassis(pros::MotorBrake::coast);   // easy to push
-  char line1[32], line2[32];
+  const double start_left = getLeftRotationDegree(), start_right = getRightRotationDegree();
+  // Each left motor on its own (in left_chassis order): a half motor reads about 1/3 of a blue one
+  double start_each[3] = {0, 0, 0};
+  for (int i = 0; i < 3; i++) start_each[i] = left_chassis.get_position(i);
+  char line0[32], line1[32], line2[32];
   while (true) {
+    double each[3];
+    for (int i = 0; i < 3; i++) each[i] = (left_chassis.get_position(i) - start_each[i]) / 360.0 * wheel_distance_in;
+    snprintf(line0, sizeof(line0), "%.0f %.0f %.0f", each[0], each[1], each[2]);
     snprintf(line1, sizeof(line1), "X %.2f Y %.2f", x_pos, y_pos);
-    snprintf(line2, sizeof(line2), "H %.1f", getInertialHeading());
-    controllerLines("ODOM CHECK", line1, line2);
+    snprintf(line2, sizeof(line2), "H%.0f L%.1f R%.1f", getInertialHeading(),
+             (getLeftRotationDegree() - start_left) / 360.0 * wheel_distance_in,
+             (getRightRotationDegree() - start_right) / 360.0 * wheel_distance_in);
+    controllerLines(line0, line1, line2);
   }
 }
 
 /*
- * "Square Test": a 24" square that comes back to the start. The controller shows where the robot
- * thinks it ended (should be about 0, 0, 0). Run it 3 times: the same error every time = PID or
+ * "Square Test": a 24" square that comes back to the start. The controller and the Brain screen show where the
+ * robot thinks it ended (should be about 0, 0, 0). The Brain screen keeps it after a Timed Run switches to
+ * driver control (the driver readout takes over the controller). Run it 3 times: the same error every time = PID or
  * offsets, a different error every time = wheel slip or a loose tracking wheel.
  */
 void squareTestAuton() {
@@ -82,6 +118,8 @@ void squareTestAuton() {
   char line1[32], line2[32];
   snprintf(line1, sizeof(line1), "X %.2f Y %.2f", x_pos, y_pos);
   snprintf(line2, sizeof(line2), "H %.1f", getInertialHeading());
+  hw::screenRow(1, "SQUARE DONE (should be about 0, 0, 0)");
+  hw::screenRow(2, "%s  %s", line1, line2);
   while (true) controllerLines("SQUARE DONE", line1, line2);
 }
 
@@ -93,7 +131,7 @@ void squareTestAuton() {
  * and the MCL spread (if use_mcl is on). You can push the robot around and watch X / Y follow.
  */
 void sensorCheckAuton() {
-  setPose(-61.25, 0, 90);   // skills start: 9" off the left wall (walls at +-70.25), facing right
+  setPose(-61.95, 0, 90);   // skills start: center 8.3" off the left wall (walls at +-70.25), facing right
   stopChassis(pros::MotorBrake::coast);
   pros::Distance* sensors[4] = {&front_sensor, &right_sensor, &back_sensor, &left_sensor};
   int resets = 0;
@@ -119,6 +157,15 @@ void sensorCheckAuton() {
     controllerLines(line1, line2, line3);
     pros::delay(300);
   }
+}
+
+/*
+ * "Feedforward": measures drive_kS / drive_kV / drive_kA (RW's motion profiles and path following need them).
+ * Give the robot about 4 feet of open space in front and behind. Copy the numbers on the Brain screen into
+ * src/rw-config.cpp. Never ends.
+ */
+void feedforwardAuton() {
+  measureDriveFeedforward();
 }
 
 /*
