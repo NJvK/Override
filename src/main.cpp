@@ -796,6 +796,18 @@ void initialize() {
     });
 }   
 
+// Field control connected, waiting for auton to start: keep the toggle mechanism on hold
+void competition_initialize() {
+    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    toggleMechanism.brake();
+}
+
+// Disabled (before auton, and between auton and driver): keep the toggle mechanism on hold
+void disabled() {
+    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    toggleMechanism.brake();
+}
+
 // Autonomous selector (only runs when field control / a competition switch starts autonomous)
 void autonomous() {
     toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
@@ -1117,7 +1129,7 @@ void opcontrol() {
         } else {
 
             if (clawHolding) {
-                claw.move_velocity(60);
+                claw.move_velocity(CLAW_HOLD_SPEED);
             } else {
                 claw.move_velocity(0);
             }
@@ -1125,7 +1137,7 @@ void opcontrol() {
         // Pin pickup: R1 is held (claw driving forward) but the claw has slowed to a stall, so it has a pin.
         // If the lift is low, move it to PIN_LIFT_HEIGHT. This runs once per R1 press.
         // It watches the claw both while R1 is held AND after R1 is released (the claw keeps squeezing at
-        // 60 rpm), so a quick tap of R1 still counts. Pressing R1 again or using R2 re-arms it.
+        // CLAW_HOLD_SPEED), so a quick tap of R1 still counts. Pressing R1 again or using R2 re-arms it.
         {
             bool r1Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1);
             bool r2Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2);
@@ -1162,7 +1174,7 @@ void opcontrol() {
                     clawSlowStartMs = now;
                 }
 
-                if (now - clawSlowStartMs >= CLAW_STALL_CONFIRM_MS) {
+                if (now - clawSlowStartMs >= CLAW_DRIVER_STALL_CONFIRM_MS) {
                     clawStallLatched = true;
 
                     double liftPos = getDR4BPosition();

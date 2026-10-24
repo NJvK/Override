@@ -144,6 +144,16 @@ void qualBlueTop() {
     runOpeningRoute(QUAL_BLUE_TOP);
 }
 
+// Blue Top start, but only the toggle and the preload (no field pins)
+void qualPreloadOnly() {
+    runOpeningRoutePreloadOnly(QUAL_BLUE_TOP);
+}
+
+// Red Bottom start, but only the toggle and the preload (no field pins)
+void qualPreloadRed() {
+    runOpeningRoutePreloadOnly(QUAL_RED_BOTTOM);
+}
+
 // The old names (in case the selector or main.cpp still uses them): left = red left wall, right = blue right wall
 void qualLeftAlliance() {
     qualRedLeft();

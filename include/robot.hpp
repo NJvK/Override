@@ -39,12 +39,15 @@ constexpr double PIN_LIFT_MIN_VOLTAGE = 4000.0;
 // Controller buzzes this when a grab is detected, so you can tell detection from lifting problems
 constexpr const char* PIN_LIFT_RUMBLE = "..";
 constexpr double CLAW_STALL_SPEED = 50.0;       // rpm: the claw counts as "slow / stalled" below this (while R1 is held) (was 30 - higher = detects sooner)
-constexpr double CLAW_HOLD_STALL_SPEED = 15.0;  // rpm: same, after R1 is released and the claw keeps squeezing at 60 rpm
+constexpr double CLAW_HOLD_STALL_SPEED = 15.0;  // rpm: same, after R1 is released and the claw keeps squeezing at CLAW_HOLD_SPEED
+constexpr double CLAW_HOLD_SPEED = 80.0;        // rpm: driver control, claw keeps squeezing at this after R1 is released (was 60)
 // Stall checks start once the claw reaches CLAW_SPINUP_SPEED, or after CLAW_STALL_GRACE_MS at the latest
 constexpr double CLAW_SPINUP_SPEED = 80.0;      // rpm: the claw counts as "got moving" above this
 constexpr int CLAW_STALL_GRACE_MS = 120;        // ms: start checking anyway after this (element already in the claw)
 constexpr int CLAW_STALL_CONFIRM_MS = 20;       // ms: must stay slow this long before it counts as a pin (1 loop) (was 40)
                                                 // raise to 40-80 if it fires when the claw hasn't grabbed anything
+// Driver control only (main.cpp): waits longer before the pin lift fires. Skills still uses CLAW_STALL_CONFIRM_MS.
+constexpr int CLAW_DRIVER_STALL_CONFIRM_MS = 150;   // ms (was 20)
 
 // --- Lift zeroing: hold L2 at the bottom and the lift is pushed gently down until it stalls, then zeroed ---
 // This fixes the lift reading something like 5 when it is all the way down.
@@ -93,6 +96,8 @@ void qualRedLeft();
 void qualRedBottom();
 void qualBlueRight();
 void qualBlueTop();
+void qualPreloadOnly();      // quals.cpp:       Blue Top start, toggle + preload only
+void qualPreloadRed();       // quals.cpp:       Red Bottom start, toggle + preload only
 
 // A qual route built from the skills opening: toggle -> preload -> both field pins onto one goal.
 // Every spot, heading and tuning value is in here, so each qual auton has its own (see src/quals.cpp).
@@ -109,3 +114,4 @@ struct OpeningRoute {
     double lastBackup;                     // how far it backs off the goal after pin 2 (0 = stays there)
 };
 void runOpeningRoute(const OpeningRoute& route);   // skillsauto.cpp
+void runOpeningRoutePreloadOnly(const OpeningRoute& route);   // skillsauto.cpp: toggle + preload, no field pins

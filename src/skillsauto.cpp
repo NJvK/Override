@@ -2410,17 +2410,21 @@ void skillsAuton() {
 
 }  // namespace skills_file
 
-// The skills opening (toggle -> preload -> both field pins onto one goal) on any route, for the qual autons
-// (src/quals.cpp). Everything about the route, tuning included, comes from `route`.
-void runOpeningRoute(const OpeningRoute& route) {
-    using namespace skills_file;
-    const AutonRoute r = {
+static skills_file::AutonRoute toAutonRoute(const OpeningRoute& route) {
+    return {
         route.startX, route.startY, route.startHeading,
         route.goalX, route.goalY,
         0.0, route.preloadExtraDist,
         route.pin1X, route.pin1Y, route.pin1Heading, route.pin1GrabTurn, route.pin1GrabExtra, 0.0, route.pin1ScoreExtra,
         route.pin2X, route.pin2Y, route.pin2Heading, route.pin2GrabTurn, route.pin2GrabExtra, 0.0, route.pin2ScoreExtra
     };
+}
+
+// The skills opening (toggle -> preload -> both field pins onto one goal) on any route, for the qual autons
+// (src/quals.cpp). Everything about the route, tuning included, comes from `route`.
+void runOpeningRoute(const OpeningRoute& route) {
+    using namespace skills_file;
+    const AutonRoute r = toAutonRoute(route);
     skillsResetRunState(false);
     skillsStartAndPreload(r);
     skillsFieldPins(r, 1, route.lastBackup, 0);
@@ -2429,6 +2433,23 @@ void runOpeningRoute(const OpeningRoute& route) {
     // push down) if pin 2 reached the goal; otherwise the lift is down already, so no push. The claw keeps holding pin 2
     // until auton ends; it isn't opened or stopped.
     skillsCoastLift();
+}
+
+// Toggle + preload only (no field pins) on any qual route, then back to the start. It stops SKILLS_START_FORWARD out
+// from the start spot (where it turned after leaving the wall), facing the start heading, so it doesn't touch the toggle.
+void runOpeningRoutePreloadOnly(const OpeningRoute& route) {
+    using namespace skills_file;
+    const AutonRoute r = toAutonRoute(route);
+    skillsResetRunState(false);
+    skillsStartAndPreload(r);
+
+    const double hx = std::sin(r.startHeading * PI / 180.0), hy = std::cos(r.startHeading * PI / 180.0);
+    const double backX = r.startX + SKILLS_START_FORWARD * hx, backY = r.startY + SKILLS_START_FORWARD * hy;
+    skillsAimAt(backX, backY, false, SKILLS_EMPTY_TURN_SPEED);
+    skillsDriveToPointPrecise(backX, backY, false, 2000);
+    chassis.turnToHeading(r.startHeading, 1200, {.minSpeed = AUTON_AIM_MIN_SPEED, .earlyExitRange = 1.0});
+    autonWaitMotion();
+    chassis.tank(0, 0, true);
 }
 
 // Called from autonomous() in main.cpp: runs the 1-minute skills routine.

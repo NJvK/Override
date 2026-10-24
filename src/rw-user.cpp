@@ -63,7 +63,9 @@ void runPreAutonomous() {
   addAuton("Sensor Check", sensorCheckAuton);        // distance sensors, resets, MCL
   addAuton("IMU Scale", imuScaleAuton);              // measure imu_scale
   addAuton("Drive Calibration", calibrateDrive);     // for the simulator (see the docs: Simulator > Calibrating)
-  addAuton("Qual Left", qualLeftAlliance);           // quals.cpp: skills opening from the left wall (preload + 2 field pins)
+  // ("Qual Left" (qualLeftAlliance) made room for "Preload Red": it ran the same route as "Red Left")
+  addAuton("Preload Only", qualPreloadOnly);         // quals.cpp: Blue Top start, toggle + preload only
+  addAuton("Preload Red", qualPreloadRed);           // quals.cpp: Red Bottom start, toggle + preload only
   // (the selector holds 12, so "Feedforward" isn't listed: run it with TIMED_RUN_TEST = feedforwardAuton above)
   startAutonSelector();
 }
