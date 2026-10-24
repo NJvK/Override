@@ -198,7 +198,12 @@ int fieldAwareReset(double maxJump) {
     uint32_t stamps[4] = {0, 0, 0, 0};
     for (int i = 0; i < 4; i++) stamps[i] = hw::distanceTimestamp(sensors[i]);
     double start = hw::timeMsec();
-    while (hw::timeMsec() - start < 120) {
+        while (hw::timeMsec() - start < 120) {
+        bool done = true;   // stop early once every sensor that sees something has its 3 readings
+        for (int i = 0; i < 4; i++) {
+            if (hw::distanceInstalled(sensors[i]) && hw::distanceDetected(sensors[i]) && counts[i] < 3) done = false;
+        }
+        if (done) break;
         for (int i = 0; i < 4; i++) {
             if (counts[i] >= 3 || !hw::distanceInstalled(sensors[i]) || !hw::distanceDetected(sensors[i])) continue;
             uint32_t stamp = hw::distanceTimestamp(sensors[i]);
@@ -249,6 +254,6 @@ void startFieldMcl() {
 
 void fieldMclPinPickedUp(double x, double y) {
     for (const Obstacle& o : obstacles) {
-        if (o.gone != nullptr && std::hypot(o.x - x, o.y - y) < 1.0) *o.gone = true;
+        if (o.gone != nullptr && std::hypot(o.x - x, o.y - y) < 2.0) *o.gone = true;
     }
 }

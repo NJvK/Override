@@ -1703,8 +1703,7 @@ bool skillsScoreOnGoal(double goalX, double goalY, double height, double extraDi
     const double stopShort = AUTON_CLAW_REACH - extraDist;   // robot center stops here, claw over the goal
 
     autonSetLift(std::min(height, SKILLS_TURN_LIFT_MAX));
-    skillsAimAt(goalX, goalY, true, turnSpeed, !quick);
-    if (lost()) return false;
+    skillsAimAt(goalX, goalY, true, turnSpeed, !quick && skillsRunning);    if (lost()) return false;
     if (height > SKILLS_TURN_LIFT_MAX) {
         // Tall stack spot: full speed with the lift at SKILLS_TURN_LIFT_MAX until it's just far enough out that the
         // lift can finish the climb on the way in (SKILLS_LIFT_DEG_PER_S, at the tall-lift speed), then the rest of
@@ -2050,8 +2049,7 @@ void skillsStartAndPreload(const AutonRoute& r) {
 
     chassis.setPose(r.startX, r.startY, r.startHeading);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_BRAKE);
-    fieldAwareReset(SKILLS_RESET_JUMP);   // distance sensors check the start spot (only if use_distance_resets is on)
-
+    if (skillsRunning) fieldAwareReset(SKILLS_RESET_JUMP);   // start spot check (quals skip it: the one after the toggle still runs)
     autonClawSlowAtMs = 0;
     autonClawStopAtMs = 0;
     claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
@@ -2167,7 +2165,7 @@ bool skillsGrabFieldPin(double pinX, double pinY, double heading, double lineup,
     const double hx = std::sin(heading * PI / 180.0), hy = std::cos(heading * PI / 180.0);
     const double lineupX = pinX - lineup * hx, lineupY = pinY - lineup * hy;
     autonStartGrounding();   // lift all the way down on the way
-    skillsAimAt(lineupX, lineupY, true, SKILLS_EMPTY_TURN_SPEED);
+    skillsAimAt(lineupX, lineupY, true, SKILLS_EMPTY_TURN_SPEED, skillsRunning);
     skillsDriveToPoint(lineupX, lineupY, true, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, 2500);
     skillsSettle();
     fieldAwareReset(SKILLS_RESET_JUMP);   // standing on the pin's line: fix X / Y before lining up into it
