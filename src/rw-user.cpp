@@ -7,7 +7,8 @@ extern bool selector_running;   // RW's auton selector: false stops it (what run
 
 // Test that autonomous always runs, whatever is picked on the selector (for tuning with the controller's Timed Run):
 //   exampleAuton = "Tuning Test", squareTestAuton = "Square Test", exampleAuton2 = "Odom Test",
-//   odomCheckAuton = "Odom Check", sensorCheckAuton = "Sensor Check", manyPinAlliance = "Skills", ...
+//   odomCheckAuton = "Odom Check", sensorCheckAuton = "Sensor Check", manyPinAlliance = "Skills",
+//   qualLeftAlliance = "Qual Left", qualRightAlliance = "Qual Right", feedforwardAuton = "Feedforward", ...
 // SET IT BACK TO nullptr BEFORE A MATCH, or Skills / the qual autons won't run.
 void (*const TIMED_RUN_TEST)() = manyPinAlliance;
 
@@ -56,12 +57,14 @@ void runPreAutonomous() {
   addAuton("Qual Mirror R", mirrorAllianceRight);    // autonmirror.cpp: 3-pin route, right wall
   addAuton("Qual Mirror Top", mirrorAllianceTop);    // autonmirror.cpp: 3-pin route, top wall
   addAuton("Tuning Test", exampleAuton);             // drive + turn PID
-  addAuton("Odom Test", exampleAuton2);              // drives a few points and back
+  addAuton("Qual Right", qualRightAlliance);         // quals.cpp: Qual Left mirrored, from the right wall
+  // (the selector holds 12: "Odom Test" (exampleAuton2) made room for "Qual Right"; run it with TIMED_RUN_TEST)
   addAuton("Odom Check", odomCheckAuton);            // push by hand, read X / Y / heading
   addAuton("Square Test", squareTestAuton);          // 24" square, should end at 0, 0, 0
   addAuton("Sensor Check", sensorCheckAuton);        // distance sensors, resets, MCL
   addAuton("IMU Scale", imuScaleAuton);              // measure imu_scale
   addAuton("Drive Calibration", calibrateDrive);     // for the simulator (see the docs: Simulator > Calibrating)
-  addAuton("Feedforward", feedforwardAuton);         // measure drive_kS / kV / kA (selector holds 12: this is the last slot)
+  addAuton("Qual Left", qualLeftAlliance);           // quals.cpp: skills opening from the left wall (preload + 2 field pins)
+  // (the selector holds 12, so "Feedforward" isn't listed: run it with TIMED_RUN_TEST = feedforwardAuton above)
   startAutonSelector();
 }

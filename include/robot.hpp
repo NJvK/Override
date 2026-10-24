@@ -87,3 +87,21 @@ void mirrorAlliance();       // autonmirror.cpp: 3-pin route, right wall or top 
 void mirrorAllianceRight();  // autonmirror.cpp: 3-pin route from the right wall
 void mirrorAllianceTop();    // autonmirror.cpp: 3-pin route from the top wall
 void manyPinAlliance();      // skillsauto.cpp:  the 1-minute skills run
+void qualLeftAlliance();     // quals.cpp:       qual from the left wall: the skills opening (preload + both field pins)
+void qualRightAlliance();    // quals.cpp:       qual from the right wall: the left one mirrored (all angles swapped)
+
+// A qual route built from the skills opening: toggle -> preload -> both field pins onto one goal.
+// Every spot, heading and tuning value is in here, so each qual auton has its own (see src/quals.cpp).
+struct OpeningRoute {
+    double startX, startY, startHeading;   // start pose (inches, compass degrees)
+    double goalX, goalY;                   // the goal the preload and both pins go on
+    double preloadExtraDist;               // + = preload goes further onto the goal, - = shorter
+    double pin1X, pin1Y, pin1Heading;      // field pin 1, and the heading it's approached along
+    double pin1GrabTurn;                   // + = approach line turned more clockwise (comes in more to the RIGHT), - = left
+    double pin1GrabExtra;                  // + = drives further into the pin, - = shorter
+    double pin1ScoreExtra;                 // + = goes further onto the goal when scoring it, - = shorter
+    double pin2X, pin2Y, pin2Heading;      // field pin 2, and the heading it's approached along
+    double pin2GrabTurn, pin2GrabExtra, pin2ScoreExtra;   // same as pin 1
+    double lastBackup;                     // how far it backs off the goal after pin 2 (0 = stays there)
+};
+void runOpeningRoute(const OpeningRoute& route);   // skillsauto.cpp

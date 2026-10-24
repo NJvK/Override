@@ -81,3 +81,6 @@ int localizeWithWalls();
 void startFieldMcl();
 // Tells it a field pin at (x, y) is gone (picked up), so beams past that spot count again
 void fieldMclPinPickedUp(double x, double y);
+// One-shot reset while stopped with the field-aware checks (works next to the loaders, unlike localizeWithWalls).
+// Skips a reading that would move X or Y more than maxJump. Returns how many sensors reset X or Y.
+int fieldAwareReset(double maxJump);

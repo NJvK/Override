@@ -1,6 +1,10 @@
 // SKILLS autonomous (1 minute). main.cpp calls manyPinAlliance() at the bottom of this file.
 // The qual routes still live in auton.cpp (twoPinAlliance).
 #include "robot.hpp"
+#ifdef RW_SIM_PROS
+#include <cstdlib>   // getenv (SIM_MISS, see skillsClawHasPin)
+#include <string>
+#endif
 
 // Everything in this file is inside its own namespace, so it can live next to auton.cpp
 // (which has functions with the same names) without "multiple definition" errors.
@@ -46,13 +50,13 @@ constexpr double AUTON_GOAL_X = 2.0 * TILE;          // 48: alliance goal sits o
 constexpr double AUTON_GOAL_Y = 1.0 * TILE;          // 24
 
 // Pin + cup 1: one tile left of the goal
-constexpr double AUTON_PIN1_X = 1.0 * TILE;          // 24 (field pins aren't used in skills)
-constexpr double AUTON_PIN1_Y = 1.0 * TILE;          // 24 (was tuned to 23)
+constexpr double AUTON_PIN1_X = 23.55;               // RW field grid, same as the goals (was 24)
+constexpr double AUTON_PIN1_Y = 23.55;               // (was 24)
 constexpr double AUTON_PIN1_APPROACH_HEADING = 322.0;  // drives in from the lower right (stays clear of the small pin below it)
 
 // Pin + cup 2: one tile above the goal
-constexpr double AUTON_PIN2_X = 2.0 * TILE;          // 48
-constexpr double AUTON_PIN2_Y = 2.0 * TILE;          // 48
+constexpr double AUTON_PIN2_X = 47.09;               // RW field grid (was 48)
+constexpr double AUTON_PIN2_Y = 47.09;               // (was 48)
 constexpr double AUTON_PIN2_APPROACH_HEADING = 43.0;   // drives in along the diagonal line from the lower left (stays clear of the goal)
 
 // Lift
@@ -76,7 +80,7 @@ constexpr int AUTON_APPROACH_CLAW_SPEED = 300;  // rpm the claw spins at while d
                                                 // + = same way as R1 (closing), - = same way as R2 (opening)
 constexpr double AUTON_SLOW_DIST = 4.0;         // the last this-many inches to the pin are driven slowly
 constexpr int AUTON_SLOW_SPEED = 25;            // speed driving straight into a pin to pick it up (out of 127) (was 40)
-constexpr int AUTON_CLAW_HOLD_SPEED = 60;       // slow grabbing speed (same as driver control)
+constexpr int AUTON_CLAW_HOLD_SPEED = 100;       // slow grabbing speed (same as driver control)
 constexpr int AUTON_CLAW_OPEN_MS = 300;         // how long the claw spins backward to open
 constexpr int AUTON_CLAW_FAST_MS = 1000;        // claw squeezes at full speed this long after closing, then drops to the slow speed
 constexpr int AUTON_GRAB_TIMEOUT_MS = 300;      // if no claw stall is seen by then, it does the small lift anyway (was 400)
@@ -132,7 +136,7 @@ constexpr int AUTON_PIN2_STACK = 3;
 // SCORE_TURN_LESS:  degrees. + = turns LESS toward the goal than straight at it, - = turns MORE (same idea as the preload)
 // SCORE_EXTRA_DIST: inches. + = drives FURTHER toward the goal when scoring (it was stopping short), - = stops shorter
 constexpr double AUTON_PIN1_GRAB_TURN_OFFSET = 0.0;   // (was field-tuned to 3)
-constexpr double AUTON_PIN1_GRAB_EXTRA_DIST = 0.0;    // (was field-tuned to 2)
+constexpr double AUTON_PIN1_GRAB_EXTRA_DIST = -4.0;   // drove too far into pin 1 on the robot (was 0; field-tuned to 2 on the old route)
 constexpr double AUTON_PIN1_SCORE_TURN_LESS = 0.0;    // (was field-tuned to 2)
 constexpr double AUTON_PIN1_SCORE_EXTRA_DIST = 0.0;   // (was field-tuned to -1)
 
@@ -142,7 +146,7 @@ constexpr int AUTON_PIN1_APPROACH_SPEED = 70;         // top speed driving up to
 constexpr int AUTON_PIN1_SLOW_SPEED = 20;             // speed for the last slow inches into pin 1 (out of 127). Was AUTON_SLOW_SPEED (30)
 constexpr double AUTON_PIN2_SLOW_DIST = 6.0;          // starts slow earlier for pin 2 (it was still knocking it over)
 constexpr int AUTON_PIN2_EXTRA_CLAW_MS = 400;         // claw keeps spinning at full speed this much longer on pin 2 before the lift goes up (pin 1 = 0)
-constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = 0.0;    // was 3: 3" less, same reason as pin 1
+constexpr double AUTON_PIN2_GRAB_EXTRA_DIST = -2.0;   // drove too far into pin 2 on the robot (was 0)
 constexpr double AUTON_PIN2_SCORE_TURN_LESS = 0.0;    // not tested yet
 constexpr double AUTON_PIN2_SCORE_EXTRA_DIST = 0.0;   // not tested yet
 
@@ -247,7 +251,9 @@ double autonGoalY = AUTON_GOAL_Y;
 // =====================================================================
 // Drives with the lift up use a gentle speed-up and slow-down so the robot doesn't tip. Top speed is still high.
 // "Tall" = lift above SKILLS_TALL_LIFT_DEG.
-constexpr double SKILLS_TALL_LIFT_DEG = 150.0;
+// Only ABOVE the preload + 2 pin stack height (spot 3 = 368.5) counts as tall now: below it the robot drives at full
+// speed. Above it, everything below stays exactly as it was (the speeds that don't tip it). (was 150)
+constexpr double SKILLS_TALL_LIFT_DEG = 380.0;
 // The video showed the robot rocking/tipping even with the lift low (the old 8 / 10 were about 1 g of
 // speed-up and 0.5 g of braking). These are about 3x gentler. Raise a little at a time if it's solid.
 constexpr double SKILLS_ACCEL = 3.2;          // speed added per 10 ms when the lift is low (0 -> 120 in ~0.4 s) (was 2.5: no tipping, so a little quicker)
@@ -266,7 +272,8 @@ constexpr int SKILLS_MATCHLOAD_TURN_SPEED = 110;  // turning toward a goal with 
 constexpr int SKILLS_EMPTY_TURN_SPEED = 127;  // turns with the claw empty and the lift down (toward the loader, the route to the sweep):
                                               // nothing to fling
 // While turning toward a goal, the lift only goes up to this height; the rest happens while driving straight in
-constexpr double SKILLS_TURN_LIFT_MAX = 140.0;   // under SKILLS_TALL_LIFT_DEG, so the turn isn't slowed (at 150 the PID's overshoot made it "tall")
+constexpr double SKILLS_TURN_LIFT_MAX = 370.0;   // most the lift is raised to while turning (just under SKILLS_TALL_LIFT_DEG, so turns stay
+                                                 // fast); the rest of the way up happens while driving to the goal. (was 140)
 // =====================================================================
 
 // Speed the robot is still rolling at when one skills move hands off to the next (+ forward, - backward)
@@ -285,8 +292,46 @@ uint32_t autonClawSlowAtMs = 0;   // when the claw drops from full speed to the 
 uint32_t autonClawStopAtMs = 0;   // when the claw stops spinning backward after opening
 
 // Runs the claw timers. Called every 10 ms while auton waits on anything.
+// ---------------------------------------------------------------------
+// PIN CHECK: is the claw really holding the pin it just picked up?
+// ---------------------------------------------------------------------
+// Holding a pin, the claw stalls or creeps. If it stays faster than SKILLS_PIN_HELD_RPM (never dropping below it) for
+// SKILLS_PIN_LOST_MS while it should be holding (hold speed 100 rpm), there's nothing in it: the pickup missed. Only checked while
+// holding (from the end of a pickup until the claw opens): opening stalls the claw too.
+constexpr double SKILLS_PIN_HELD_RPM = 50.0;      // (was 10: every pin and cup set it off, the claw creeps while it squeezes)
+constexpr uint32_t SKILLS_PIN_LOST_MS = 1000;     // (was 500)
+bool skillsPinWatch = false;       // the claw should be holding a pin right now
+uint32_t skillsPinSpinSince = 0;   // when it started spinning freely (0 = stalled, holding)
+bool skillsPinLost = false;        // the check decided the claw is empty
+bool skillsAbortOnLost = false;    // carrying to a goal: drives and turns stop as soon as skillsPinLost is set
+int skillsPickupCount = 0;         // pickups so far (1, 2 = field pins), for the simulator's pretend misses
+
+bool skillsClawHasPin() {
+#ifdef RW_SIM_PROS
+    // The simulator's claw never stalls (there's nothing to grab), so it pretends every pickup worked, except the ones
+    // listed in the SIM_MISS environment variable (pickup numbers, e.g. SIM_MISS=1,2 for both field pins)
+    static const std::string miss = std::string(",") + (std::getenv("SIM_MISS") ? std::getenv("SIM_MISS") : "") + ",";
+    return miss.find("," + std::to_string(skillsPickupCount) + ",") == std::string::npos;
+#else
+    return std::fabs(claw.get_actual_velocity()) <= SKILLS_PIN_HELD_RPM;
+#endif
+}
+
+// Starts / stops the pin check (the end of a pickup / the claw opening)
+void skillsWatchPin(bool on) {
+    skillsPinWatch = on;
+    skillsPinSpinSince = 0;
+    if (on) skillsPinLost = false;
+}
+
 void autonTick() {
     uint32_t now = pros::millis();
+
+    if (skillsPinWatch && !skillsPinLost) {
+        if (skillsClawHasPin()) skillsPinSpinSince = 0;
+        else if (skillsPinSpinSince == 0) skillsPinSpinSince = now;
+        else if (now - skillsPinSpinSince >= SKILLS_PIN_LOST_MS) skillsPinLost = true;
+    }
 
     if (autonClawSlowAtMs != 0 && now >= autonClawSlowAtMs) {
         claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
@@ -332,6 +377,10 @@ void autonStartGrounding() {
 // Waits for the current drive motion to finish
 void autonWaitMotion() {
     while (chassis.isInMotion()) {
+        if (skillsAbortOnLost && skillsPinLost) {   // carrying a pin that isn't there: stop right away
+            chassis.cancelMotion();
+            break;
+        }
         autonTick();
         pros::delay(10);
     }
@@ -369,6 +418,7 @@ void autonWaitLift(double target, uint32_t timeoutMs) {
 
 // Opens the claw (spins backward for openMs, then stops). Doesn't wait.
 void autonOpenClaw(int openMs = AUTON_CLAW_OPEN_MS) {
+    skillsWatchPin(false);   // opening: not holding anything any more (and opening stalls the claw too)
     autonClawSlowAtMs = 0;
     claw.move_velocity(-200);
     autonClawStopAtMs = pros::millis() + openMs;
@@ -553,11 +603,21 @@ void skillsRampDrive(double distance, double heading, int maxSpeed, uint32_t tim
     double target = std::fabs(distance);
     double speed = 0.0;
 
+    // Ends once the robot has stopped moving (under 0.15" in 150 ms, after the first 300 ms), instead of holding
+    // until the timeout (the park sat still for 0.8 s at the end that way)
+    Pose stallPose = start;
+    uint32_t stallMark = pros::millis();
     uint32_t t0 = pros::millis();
     while (pros::millis() - t0 < timeoutMs) {
         Pose p = chassis.getPose();
         double remaining = target - ((p.x - start.x) * hx + (p.y - start.y) * hy) * dir;
         if (remaining <= 0.3) break;
+        if (pros::millis() - stallMark >= 150) {
+            bool moved = std::hypot(p.x - stallPose.x, p.y - stallPose.y) >= 0.15;
+            stallMark = pros::millis();
+            stallPose = p;
+            if (!moved && pros::millis() - t0 >= 300) break;
+        }
 
         bool tall = getDR4BPosition() > SKILLS_TALL_LIFT_DEG;
         speed = std::min(speed + (tall ? SKILLS_ACCEL_TALL : SKILLS_ACCEL), static_cast<double>(maxSpeed));
@@ -797,9 +857,8 @@ const AutonRoute TOP_ROUTE = {
 // (turn offsets, distance offsets) carries over unchanged.
 //
 // Red goal A = (-47.09, -23.55): preload, both field pins, then SKILLS_A_LOADS matchloads.
-// Red goal B = (-23.55, -47.09): the goal in the bottom quadrant. A pin-only "preload" from the matchloader, then
-// as many of SKILLS_B_LOADS matchloads as the time guard allows (all 3 fit in the simulator: 4 pins on each goal
-// with 5 loader trips, sweep + park done at 54 s).
+// Red goal B = (-23.55, -47.09): the goal in the bottom quadrant. Matchloads (its first one goes on spot 1), as many as
+// the time guard allows. Every pickup is the same fixed SKILLS_PICKUP_MS, and nothing ever waits for the lift.
 
 // --- Matchloader (bottom of the left wall) ---
 // Field element spots come from RW-Template's Override field (the same field its simulator draws, so the
@@ -812,66 +871,125 @@ const AutonRoute TOP_ROUTE = {
 //   P: on the loader line. The drive steers onto the line before P (at most SKILLS_LINEUP_MIN_HEADING, about
 //      18 deg off), so from P in it is square to the loader. It used to stop at P and turn; now it never stops.
 constexpr double SKILLS_LOADER_Y = -58.7;                                         // loader center (RW field: +-58.7)
+// Sideways offset for the line it drives in on: + = stops more to the ROBOT'S RIGHT as it faces the loader (+Y here).
+// On the robot it stopped 1-2" too far right, so -1.5. The robot's side then runs 1.66" off the bottom wall.
+constexpr double SKILLS_LOADER_RIGHT_ADJUST = -1.5;
+constexpr double SKILLS_LOADER_LINE_Y = SKILLS_LOADER_Y + SKILLS_LOADER_RIGHT_ADJUST;   // -60.2: the line it drives in on
 constexpr double SKILLS_LOADER_FACE_X = -FIELD_HALF + 3.75;                       // -66.5: front face of the loader (sticks out 3.75" from the wall)
-constexpr double SKILLS_LOADER_GAP = 1.0;          // the claw (front of the robot) stops this far from the loader face. Raise it if
+constexpr double SKILLS_LOADER_GAP = 1.5;          // the FRONT of the robot stops this far from the loader face (was 1.0: in the simulator it
+                                                   // came within 0.4" of the loader with 1.0). Raise it if
                                                    // the claw still touches the loader, lower it if it can't reach the pin.
 // The FRONT of the robot (not the claw) is what has to stay off the loader: the claw is 1.55" behind it,
 // so the claw ends SKILLS_LOADER_GAP + 1.55" from the loader face.
-constexpr double SKILLS_LOADER_GRAB_X = SKILLS_LOADER_FACE_X + SKILLS_LOADER_GAP + ROBOT_CENTER_TO_FRONT;   // -57.45: robot center when loading
+constexpr double SKILLS_LOADER_EXTRA_DIST = 1.5;   // + = drives this much further into the loader than SKILLS_LOADER_GAP (robot: 1.5" more
+                                                   // was better). Note: 1.5 with a 1.5 gap puts the front right at the loader face
+constexpr double SKILLS_LOADER_GRAB_X = SKILLS_LOADER_FACE_X + SKILLS_LOADER_GAP + ROBOT_CENTER_TO_FRONT - SKILLS_LOADER_EXTRA_DIST;   // -56.95: robot center when loading
 constexpr double SKILLS_LOADER_RUN_IN = 7.5;       // inches of dead-straight drive along the loader line into the loader
 constexpr double SKILLS_LOADER_LINEUP_X = SKILLS_LOADER_GRAB_X + SKILLS_LOADER_RUN_IN;   // -49.95 (spot P)
 // (SKILLS_LOADER_TURN_X/Y, spot T, are worked out below, after goal B)
 constexpr double SKILLS_LOADER_ROLL = 0.6;         // the robot rolls about this far after it stops driving into the loader, so it stops this early
-constexpr int SKILLS_LOADER_DRIVE_IN_SPEED = 80;   // top speed once it's on the loader line (P on in); slows down on its own at the end
+constexpr int SKILLS_LOADER_DRIVE_IN_SPEED = 55;   // (was 80: slower so it stops in the same spot every time)   // top speed once it's on the loader line (P on in); slows down on its own at the end
 constexpr int SKILLS_LINEUP_SPEED = 90;            // top speed from T to P
 constexpr double SKILLS_LINEUP_MIN_HEADING = 252.0; // steepest heading allowed from T to P (a steeper one lets the corner get close to the bottom wall)
 constexpr double SKILLS_LINEUP_STEER = 6.0;        // degrees of heading toward the loader line per inch off it (T to P)
-constexpr int SKILLS_MATCHLOAD_HOLD_MS = 600;      // most time the claw spins at full speed at the loader before it lifts (was 750)
-constexpr int SKILLS_MATCHLOAD_MIN_HOLD_MS = 250;  // after this, the hold ends as soon as the claw stalls on the pin (it has it)
-constexpr int SKILLS_LOAD_RISE_WAIT_MS = 300;      // waits at most this long for the 15 deg lift before backing out (was 750). The lift
-                                                   // still finishes going up on its own; it normally takes ~0.15 s
-constexpr double SKILLS_LOAD_RISE = 15.0;          // degrees the lift goes up at the loader before it moves or turns (lift starts at ~0)
-constexpr int SKILLS_PIN_ONLY_WAIT_MS = 500;       // claw stays open and still under the loader this long for the pin-only load
+constexpr double SKILLS_PRECISE_TOL = 0.6;          // turn spot T: it fixes any slide past it bigger than this (inches) before turning
+constexpr int SKILLS_PRECISE_SPEED = 35;
+constexpr double SKILLS_LOADER_EXIT_STRAIGHT = 2.5;  // leaving the loader: dead straight back this far before it starts climbing away
+// Leaving the loader it can let the corners get this close (with the loader line SKILLS_LOADER_RIGHT_ADJUST lower, its
+// side is only 1.66" off the wall there, so with SKILLS_LOADER_WALL_SPARE it could never start climbing back to T)
+constexpr double SKILLS_LOADER_EXIT_WALL_SPARE = 0.75;   // (was 1.0: with the -1.5 loader line it reached T up to 2" low, and
+                                                         // turning there clipped the bottom wall)
+constexpr double SKILLS_LOADER_WALL_SPARE = 1.75;   // driving next to the loader, the corners always stay at least this far off the bottom wall
+                                                   // (turns in place there keep SKILLS_LOADER_TURN_SPARE)
+constexpr int SKILLS_LOADER_TURNING_SPEED = 45;     // near the loader: most speed while the heading is still 5+ degrees off what it should be
+constexpr int SKILLS_LOADER_CLIMB_SPEED = 60;       // leaving the loader: most speed while it climbs away from the wall (was 45)
+constexpr double SKILLS_LOADER_STEER_KP = 2.5;      // steering next to the loader (stronger than SKILLS_STEER_KP, so it turns quickly)
+constexpr double SKILLS_LOADER_STEER_MAX = 50.0;
+// --- Every pickup (matchloads, the first goal B load, both field pins) ---
+// The robot stands still for exactly SKILLS_PICKUP_MS: the claw spins at full speed the whole time, and in the last
+// SKILLS_PICKUP_LIFT_MS the lift kicks up (15 deg at the loader, 25 deg for a field pin). Then it drives off.
+// It does NOT check the claw for a stall and does NOT wait for the lift: it's a fixed time, every time.
+// (The old "3-4 s at the loader" was a hidden timer: the drive into the loader kept creeping for up to 2.5 s whenever
+// odometry said it wasn't quite there yet. That drive now gives up as soon as the robot stops moving, see
+// SKILLS_STALL_MS, and has a short time limit.)
+constexpr int SKILLS_PICKUP_MS = 1200;             // total time stopped for a pickup (was 1500: 7 pickups, 2.1 s back for the second toggle)
+constexpr int SKILLS_PICKUP_LIFT_MS = 150;         // the last part of it, with the lift kicking up
+constexpr double SKILLS_LOAD_RISE = 15.0;          // degrees the lift goes up at the loader before it moves or turns
+constexpr double SKILLS_FIELD_PIN_RISE = AUTON_PIN_PICKUP_RISE;   // 25 degrees for a field pin (off the floor)
+// Wall resets (fieldAwareReset) at every spot where the robot is standing still anyway: the start (before and after
+// the toggle), each pin line-up and pickup, before big turns, while the claw lets go at a goal, the turn spot T, the
+// loader, and before the sweep. A reading that says it's more than this far off is skipped (a reading that far off
+// is something in the beam, not drift).
+constexpr double SKILLS_RESET_JUMP = 3.0;
+// After a missed matchload (the pin check), the next trip in clears the loader first: it stops SKILLS_LOADER_CLEAR_SHORT
+// short of the grab spot, turns right as far as fits (the bottom wall limits it: the back-left corner swings down, so
+// only about 5-8 degrees fit, worked out from where it really is; the front-left corner also stays off the loader),
+// turns back square, and drives the rest of the way in quickly, pushing fallen pins and cups out of the way.
+constexpr double SKILLS_LOADER_CLEAR_SHORT = 4.0;
+constexpr double SKILLS_LOADER_CLEAR_WALL_SPARE = 1.0;    // corners to the bottom wall / loader during the turn (0.5 touched
+                                                         // the wall in the simulator: odometry error + the turn's overshoot)
+constexpr double SKILLS_LOADER_CLEAR_COAST_DEG = 1.5;    // stops driving the turn this early (it keeps turning a little)
+constexpr int SKILLS_LOADER_CLEAR_TURN_SPEED = 45;       // the turn (driven directly: RW's turn finished a 1-4 degree turn
+                                                         // within its 1 degree early exit, so it barely moved)
+constexpr double SKILLS_LOADER_CLEAR_MAX_DEG = 20.0;
+constexpr int SKILLS_LOADER_CLEAR_IN_SPEED = 90;          // the quick drive back in after the turn
+bool skillsClearLoaderNext = false;   // set by a missed matchload
+constexpr int SKILLS_LOADER_IN_MAX_MS = 1800;      // the drive from the turn spot into the loader never takes longer than this
+// Any drive gives up once the robot has stopped moving (it's touching something or can't get closer): moved less
+// than SKILLS_STALL_MOVE inches in SKILLS_STALL_MS, after its first 2 x SKILLS_STALL_MS. Pushing into things is what
+// knocks the robot's position off; this way it never pushes.
+constexpr int SKILLS_STALL_MS = 150;
+constexpr double SKILLS_STALL_MOVE = 0.15;
+// Before every big turn in place (more than SKILLS_SETTLE_TURN_DEG) it waits until it has really stopped (under
+// SKILLS_SETTLE_SPEED in/s, at most SKILLS_SETTLE_MAX_MS). Turning while still rolling is what slid the robot about
+// 2" past the turn spot next to the loader, so its corner came within 0.8" of the bottom wall.
+constexpr double SKILLS_SETTLE_TURN_DEG = 45.0;
+constexpr double SKILLS_SETTLE_SPEED = 2.0;
+constexpr int SKILLS_SETTLE_MAX_MS = 250;
 
 // --- Continuous driving (no stopping to aim or settle between moves) ---
-// The only waits longer than a second are the start toggle and the matchload hold (SKILLS_MATCHLOAD_HOLD_MS).
+// The only waits longer than a second are the start toggle and the pickups (SKILLS_PICKUP_MS).
 constexpr int SKILLS_ROLL_SPEED = 70;              // speed kept when one move hands off to the next (out of 127) (was 50)
 constexpr double SKILLS_AIM_SKIP_DEG = 20.0;       // smaller aim errors than this aren't turned first; the drive steers them out
 constexpr double SKILLS_ROLL_TURN_EXIT_DEG = 10.0; // turns hand off to the drive this many degrees early (no settling)
 constexpr int SKILLS_ROLL_TURN_MIN_SPEED = 40;
 constexpr double SKILLS_STEER_KP = 1.5;            // steering per degree off while driving at a point
 constexpr double SKILLS_STEER_MAX = 30.0;          // most steering added on top of the drive speed
-constexpr double SKILLS_LIFT_GATE_DIST = 2.0;      // last inches before a goal: creeps if the lift isn't up yet (stops only if still not up at the goal)
-constexpr int SKILLS_LIFT_CREEP_SPEED = 15;
-constexpr double SKILLS_LIFT_GATE_TOL = 20.0;      // lift counts as "up" within this many degrees (5 was too strict with a loaded lift:
-                                                   // it never got that close, so the robot sat at the goal for 3 s on the 3rd pin)
-constexpr int SKILLS_LIFT_GATE_MAX_MS = 600;       // never waits longer than this for the lift at a goal
-// Scoring approach in 2 parts so the robot never drives fast with the lift tall:
-//   1. fast drive toward the goal with the lift at most SKILLS_DRIVE_LIFT_MAX (low, stable)
-//   2. the last SKILLS_RAISE_DIST inches at SKILLS_FINAL_SPEED while the lift goes the rest of the way up
-constexpr double SKILLS_DRIVE_LIFT_MAX = 140.0;   // same: under SKILLS_TALL_LIFT_DEG so the fast part really is fast (was 150)
-constexpr double SKILLS_RAISE_DIST = 10.0;   // (was 14)
-constexpr int SKILLS_FINAL_SPEED = 32;        // (was 40: the robot rocked hard stopping at goal A with the lift tall, ~24 s in the video)
+constexpr double SKILLS_LIFT_DEG_PER_S = 600.0;   // how fast the lift climbs (main.cpp's DR4B_SLEW_UP): about 1 s to the top
+constexpr double SKILLS_TALL_IN_PER_S = 25.0;     // about how fast the robot drives with the lift tall (SKILLS_TALL_MAX_SPEED)
+constexpr double SKILLS_RAISE_SPARE = 2.0;        // inches added to the raise distance, so the lift is up just before the goal
+// Scoring never waits for the lift (the lift reaches the top in about 1 s): it goes up to SKILLS_TURN_LIFT_MAX while
+// the robot turns toward the goal, then all the way while it drives there. As soon as the claw is over the goal it
+// lowers and lets go. The only speed limit from the lift is the one that was already there for a tall lift
+// (above SKILLS_TALL_LIFT_DEG): same speeds as before.
 // After the hold it always goes and scores (no going back to the loader if it missed: it acts as if it has the pin).
 // Position at the loader: it stops by odometry (it never touches anything). While it holds there, the distance
 // sensors check X / Y (localizeWithWalls, when use_distance_resets is on) and MCL keeps correcting while driving.
 constexpr int SKILLS_RELEASE_MS = 250;             // matchloads: after the claw starts opening on a goal, this long before backing off.
                                                    // (100 was too short: the robot backed off while the claw still had the pin and
                                                    // dragged it off the goal. That's what knocked the preload off in the video.)
-constexpr int SKILLS_PRELOAD_RELEASE_MS = 400;     // same for preload-style scores (the preload and the pin-only load onto goal B):
-                                                   // their claw opens for 500 ms, so it needs a bit longer before backing off
-constexpr int SKILLS_DROP_MAX_MS = 400;            // preload-style scores: most time allowed for lowering onto the goal (usually ~0.2 s)
+constexpr int SKILLS_PRELOAD_RELEASE_MS = 250;     // same for the preload (was 400)
+// First preload only (the start): the lift lowers onto the goal slower so the preload doesn't fling off,
+// and waits longer to get all the way down (90 degrees at 200 deg/s is 0.45 s). Everything else keeps the normal speed.
+constexpr double SKILLS_FIRST_PRELOAD_SLEW_DOWN = 200.0;   // degrees/second (auton normally lowers at DR4B_AUTON_SLEW_DOWN, 560)
+constexpr int SKILLS_FIRST_PRELOAD_LOWER_MS = 500;
+// Matchloads and field pins: the lift starts lowering onto the goal and the claw opens this long after (it used to
+// open right away, so the pin dropped from above the goal and fell off instead of scoring)
+constexpr int SKILLS_RELEASE_DELAY_MS = 700;
+constexpr int SKILLS_PRELOAD_LOWER_MS = 200;       // preload: lowers onto the goal for this long, then opens (fixed time, no waiting
+                                                   // for the lift; 100 -> 10 deg takes about 0.2 s). Was "wait for the lift, up to 0.4 s"
 constexpr double SKILLS_SCORE_BACKUP = 4.0;        // backs straight off a goal this far after scoring, then rolls into the next move
-// After the preload and the field pins: farther, so it can turn without hitting goal A (just enough for the corners
-// to clear it, +1" spare)
-constexpr double SKILLS_PRELOAD_BACKUP = ROBOT_HALF_DIAG + GOAL_HALF + 1.0 - AUTON_CLAW_REACH;   // 10.3
-// Extra straight back-off before the toggle sweep: just enough that the corners clear goal B when it turns (+1" spare)
-constexpr double SKILLS_END_BACKUP = ROBOT_HALF_DIAG + GOAL_HALF + 1.0 - AUTON_CLAW_REACH - SKILLS_SCORE_BACKUP;   // 6.3
+// Every turn in place happens with at least SKILLS_TURN_SPARE inches between the corners and anything (walls, goals).
+// (was 1": the real robot is never exactly where it thinks, so 1" wasn't enough)
+constexpr double SKILLS_TURN_SPARE = 3.0;
+// After the preload: far enough back that it can turn with SKILLS_TURN_SPARE to goal A
+constexpr double SKILLS_PRELOAD_BACKUP = ROBOT_HALF_DIAG + GOAL_HALF + SKILLS_TURN_SPARE - AUTON_CLAW_REACH;   // 12.3
 // Start: after the toggle, drives straight forward this far before turning toward goal A, so the back corners
 // clear the wall when it turns (turning right at the wall swung a back corner into it: that shoved the robot
 // and threw off where it thought goal A was). Worked out from the robot size: corner swing - center-to-back + 1".
-constexpr double SKILLS_START_FORWARD = ROBOT_HALF_DIAG - ROBOT_CENTER_TO_BACK + 1.0;   // 4.5
+constexpr double SKILLS_START_FORWARD = ROBOT_HALF_DIAG - ROBOT_CENTER_TO_BACK + SKILLS_TURN_SPARE;   // 6.5 (was +1")
 constexpr double SKILLS_TOGGLE_FINISH_DEG = 10.0;  // start toggle: waits until it's this close to done before driving off the wall
+constexpr int SKILLS_TOGGLE_LIFT_HEAD_MS = 150;    // start: the lift goes up this long before the toggle starts (fixed time)
 
 // --- Goals (RW-Template's Override field: goals at (+-47.09, +-23.55) and (+-23.55, +-47.09)) ---
 // If a goal is still off on your field, tape-measure from the LEFT wall to the goal's center (X = -70.25 + that)
@@ -880,15 +998,16 @@ constexpr double SKILLS_GOAL_B_X = -23.55;   // goal B: bottom quadrant (was -24
 constexpr double SKILLS_GOAL_B_Y = -47.09;   // (was -48)
 constexpr double SKILLS_GOAL_A_X = -47.09;   // goal A: the preload goal (was -48)
 constexpr double SKILLS_GOAL_A_Y = -23.55;   // (was -24)
-constexpr double SKILLS_A_PRELOAD_EXTRA_DIST = 0.0;  // + = preload goes further onto goal A, - = shorter
+constexpr double SKILLS_A_PRELOAD_EXTRA_DIST = -2.0; // + = preload goes further onto goal A, - = shorter (2" back, was 0)
 
 // --- Route points worked out from the field + robot size ---
 // Turn spot T (between the goals and the loader). Every turn near the loader happens here. Its Y leaves 2.7" between
 // the corners and the bottom wall when it turns in place (corners swing out 11.85"); its X leaves SKILLS_TURN_GOAL_SPARE
 // between the corners and goal B's base. From T it steers down onto the loader line (at most about 18 deg) without
 // stopping, so it's square to the loader by the line-up spot P and the corners stay about 1" off the bottom wall.
-constexpr double SKILLS_TURN_GOAL_SPARE = 3.0;
-constexpr double SKILLS_LOADER_TURN_Y = SKILLS_LOADER_Y + 3.0;   // -55.7
+constexpr double SKILLS_TURN_GOAL_SPARE = SKILLS_TURN_SPARE;
+constexpr double SKILLS_LOADER_TURN_SPARE = 2.5;    // corners to the bottom wall when it turns in place at T
+constexpr double SKILLS_LOADER_TURN_Y = -FIELD_HALF + ROBOT_HALF_DIAG + SKILLS_LOADER_TURN_SPARE;   // -55.95 (2.75" above the loader line)
 const double SKILLS_LOADER_TURN_X = SKILLS_GOAL_B_X - std::sqrt(std::pow(ROBOT_HALF_DIAG + GOAL_HALF + SKILLS_TURN_GOAL_SPARE, 2)
                                                                 - std::pow(SKILLS_LOADER_TURN_Y - SKILLS_GOAL_B_Y, 2));   // -40.3
 // Leaving the loader it backs out the same way (straight back to P, then back to T) and turns toward the goal at T.
@@ -898,7 +1017,7 @@ constexpr double SKILLS_SCORE_SPOT_Y = SKILLS_LOADER_TURN_Y;
 // --- Scoring distance offsets (+ = claw goes further onto the goal, - = shorter). Start at 0 and tune ---
 // (Aim is always straight at the goal now: the drive steers at the goal center the whole way.)
 constexpr double SKILLS_A_SCORE_EXTRA_DIST = 0.0;
-constexpr double SKILLS_B_PRELOAD_EXTRA_DIST = 0.0;    // pin-only load onto goal B (was field-tuned to -1.5)
+constexpr double SKILLS_B_PRELOAD_EXTRA_DIST = -1.0;   // goal B's first matchload (spot 1): 2" back (was 0; field-tuned to -1.5 before)
 constexpr double SKILLS_B_SCORE_EXTRA_DIST = 0.0;      // matchloads onto goal B (was field-tuned to -1.5)
 
 // --- Bottom-wall toggle + park ---
@@ -919,13 +1038,18 @@ constexpr double SKILLS_TOGGLE_LIFT_HEIGHT = 30.0; // lift height while pushing 
 constexpr double SKILLS_PARK_Y = -14.0;
 
 // --- Skills plan ---
-// Goal A: preload (spot 1), the two field pins (spots 2, 3), then SKILLS_A_LOADS matchloads (spot 4 on).
-// Goal B: pin-only load + SKILLS_B_LOADS matchloads (spots 2-4).
+// Goal A: preload (spot 1), the two field pins, then SKILLS_A_LOADS matchloads. Goal B: as many as still fit.
+// Every pin goes on the next free spot of its goal: a missed pickup (the pin check) leaves no gap.
 // The field pins sit where the robot drives to the loader (pin 2 is 10" from the loader line), so instead of going
 // around them it picks them up and scores them: each one is a loader trip saved.
-constexpr int SKILLS_A_LOADS = 1;   // goal A: preload + 2 field pins + 1 matchload = 4 pins (was 3 matchloads, no field pins)
-constexpr int SKILLS_A_FIRST_LOAD_SPOT = 4;   // the field pins took spots 2 and 3
-constexpr int SKILLS_B_LOADS = 3;   // goal B: pin-only + 3 matchloads = 4 pins; the time guard stops it early if one won't fit (was 4)
+constexpr int SKILLS_A_LOADS = 3;   // goal A: preload + 2 field pins + 3 matchloads = 6 pins (was 1)
+// Goal B gets as many pins as the time guard says still fit (its first one is lowered slowly like the preload), up to
+// this many. Every try counts as a full cycle for the time guard whether or not the pickup worked (backup scoring).
+constexpr int SKILLS_B_MAX_PINS = 5;  // goal B: first load + 4 matchloads = 5 pins (was 3). The time guard stops early if one won't fit
+// The 6th pin on goal A needs a 6th lift height (main.cpp's list stops at 5). TODO: measure it: put 5 pins on a goal,
+// raise the lift by hand until a 6th clears the stack, and read "Lift" on the controller. 795 is the list's spacing
+// carried one more step (the 5th height + the 4th-to-5th gap). If the lift can't go that high, lower it to its top.
+constexpr double SKILLS_STACK_HEIGHT_6 = 795.0;
 // First trip from goal A (after the preload) to the matchloader: goes around the RIGHT side of goal A
 // (there isn't room to pass goal A on the wall side and still turn), then down the middle to the loader turn spot.
 // WAY1 is above-right of goal A (clear of the small red pin at the left corner of the center diamond),
@@ -940,12 +1064,18 @@ constexpr double SKILLS_FIRST_WAY2_Y = (SKILLS_GOAL_A_Y + SKILLS_GOAL_B_Y) / 2.0
 
 // Field pins: grabbed the way the qual route grabs them (turned 180 degrees for this side, so the same approach
 // angles: pin 1 from the upper left, pin 2 from the upper right, the open side of each).
-// Pin 1: it first drives to a spot SKILLS_PIN_LINEUP_BACK farther back on the pin's approach line than where the grab
-// starts, so it turns to face the pin with the corners well clear of it (from WAY1 a front corner came within 0.5").
-// Pin 2 from SKILLS_PIN2_WAY, on the diagonal between goal A and goal B, so the drive there stays clear of both goals.
-constexpr double SKILLS_PIN_LINEUP_BACK = 6.0;
-constexpr double SKILLS_PIN2_WAY_X = SKILLS_FIRST_WAY2_X + 4.0 * 0.7071;   // -32.5
-constexpr double SKILLS_PIN2_WAY_Y = SKILLS_FIRST_WAY2_Y + 4.0 * 0.7071;   // -32.5
+// Smooth pickup (no sideways jerk): it stops on the pin's approach line SKILLS_PIN1_LINEUP / SKILLS_PIN2_LINEUP inches
+// before the pin (spots with SKILLS_TURN_SPARE around them), turns once to face along the line, then one straight
+// drive steers along the line into the pin with the claw spinning and stops with the claw on it. No second turn.
+// Pin 2's line runs through the middle of the gap between goal A and goal B; the lineup spot is past the gap,
+// because there's no room to turn inside it.
+constexpr double SKILLS_PIN1_LINEUP = 20.5;   // inches from pin 1 (from the upper left)
+constexpr double SKILLS_PIN2_LINEUP = 28.0;   // inches from pin 2 (from the upper right, through the gap)
+constexpr int SKILLS_PIN_IN_SPEED = 60;       // top speed along the line into a pin (was 100: it knocked the pins over)
+constexpr double SKILLS_PIN_SLOW_DIST = 6.0;  // the last this-many inches into a pin...
+constexpr int SKILLS_PIN_SLOW_SPEED = 25;     // ...at this speed (the old qual route's field-tuned pin speed)
+// After pin 1 it backs this far off goal A before heading for pin 2 (room to turn: SKILLS_TURN_SPARE to goal A)
+constexpr double SKILLS_PIN1_BACKUP = 14.0;
 
 // --- Sweep toggle at the end (claw side, right corner first then left corner) ---
 // Route from goal B: up through the gap between the two goals to WAY1 (above goal B), then over to the start spot.
@@ -970,11 +1100,14 @@ constexpr double SKILLS_SWEEP_RUN_IN = 21.0;           // inches of straight dri
 // bottom wall (by odometry). The toggle has to stick out past this for the corner to push it.
 // 1.5 (was 1): odometry lags about 0.5" there and the robot slides about 0.3" after it stops, which used up all of 1".
 constexpr double SKILLS_WALL_GAP = 1.5;
+// The swing into the second toggle can get closer (with 1.5 the swinging corner hit the limit at about 179 of its 195
+// degrees, short of the toggle)
+constexpr double SKILLS_SWEEP_SWING_WALL_GAP = 0.75;
 constexpr double SKILLS_SWEEP_HEADING_1 = 165.0;   // facing the bottom wall, angled so the right corner leads
 constexpr double SKILLS_SWEEP_HEADING_2 = 195.0;   // swung the other way so the left corner hits
 constexpr double SKILLS_SWEEP_DRIVE_IN = SKILLS_SWEEP_RUN_IN + 0.5;   // max drive in (stops early when it hits, or at SKILLS_WALL_GAP) (was +2)
-constexpr int SKILLS_SWEEP_DRIVE_SPEED = 70;
-constexpr int SKILLS_SWEEP_SWING_SPEED = 90;       // left side speed for the swing (right side stays put)
+constexpr int SKILLS_SWEEP_DRIVE_SPEED = 110;     // (was 70) it slows down on its own as a corner gets near the wall
+constexpr int SKILLS_SWEEP_SWING_SPEED = 127;      // left side speed for the swing (right side stays put) (was 90; slows down near the wall)
 constexpr int SKILLS_SWEEP_SWING_MS = 450;         // max time for the swing
 // Then fast straight back toward the center and a braked stop (it used to cut power and coast, and in the
 // simulator the coast rolled it 10" too far, into the center goal). Where it stops: back of the robot
@@ -991,15 +1124,25 @@ constexpr int SKILLS_PARK_MAX_MS = 2500;
 // and park, so those points are never lost.
 constexpr int SKILLS_PINS_PER_GOAL = 5;            // fill each goal to this many (uses ALLIANCE_HEIGHTS spots 1-5)
 constexpr uint32_t SKILLS_TIME_LIMIT_MS = 60000;
-constexpr uint32_t SKILLS_SAFETY_MS = 1000;        // spare time kept at the end
+constexpr uint32_t SKILLS_SAFETY_MS = 500;         // spare time kept at the end (was 1000)
 // Once a matchload cycle has run, the guard uses how long that one really took (+ this margin) instead of
 // SKILLS_CYCLE_MS, so when the cycles are quicker on the real robot it goes for the extra pin.
 constexpr uint32_t SKILLS_CYCLE_MARGIN_MS = 400;
-constexpr uint32_t SKILLS_END_RESERVE_MS = 6500;     // time for the sweep toggle + park from goal B (5.9 s in the simulator with the
+// The time guard's estimates below are simulator times. The robot runs slower than the simulator, so once goal A
+// cycles have been timed it scales the goal B cycles and the end reserve by (real goal A cycle) / SKILLS_SIM_A_CYCLE_MS
+// (never less than 1), so the toggle and park still fit on a slower robot.
+constexpr uint32_t SKILLS_SIM_A_CYCLE_MS = 8400;   // a goal A matchload cycle in the simulator (8.1-8.7 s with the 0.7 s release
+                                                   // delay, taller spots take longer) (was 7800 before the delay)
+constexpr uint32_t SKILLS_END_RESERVE_MS = 7000;     // time for the sweep toggle + park from goal B (6.4 s in the simulator with the
+                                                     // wall resets at every stop; was 6500 before them) (5.9 s in the simulator with the
                                                      // no-wall sweep and rolling route; the robot ran ~10% slower than the simulator before) (was 7500)
-constexpr uint32_t SKILLS_CYCLE_MS = 7500;         // time for one matchload cycle (loader -> goal): 6.2-6.9 s in the simulator with the
+constexpr uint32_t SKILLS_CYCLE_MS = 8500;  // (was 7500, before the release delay)         // time for one matchload cycle (loader -> goal): 6.2-6.9 s in the simulator with the
                                                    // no-stop loader drive (the old path was 9.0 s there and 10-11 s on the robot) (was 9500)
-constexpr uint32_t SKILLS_PIN_ONLY_CYCLE_MS = 7800;  // time for the pin-only load -> goal B (7.0 s in the simulator) (was 8500)
+constexpr uint32_t SKILLS_PIN_ONLY_CYCLE_MS = 8500;  // (7.6 s in the simulator with the release delay; was 7800)  // time for goal B's first matchload (loader -> goal B)
+// One goal B matchload cycle (turn spot -> loader -> goal B -> back): 6.35 s in the simulator. Used for the next goal B
+// load until a goal B to goal B cycle has been timed (the first goal B load starts from goal A, so it runs longer and
+// made the guard skip a load that fits: the run ended at 53 s).
+constexpr uint32_t SKILLS_B_CYCLE_MS = 7200;   // (was 6500, before the 0.7 s release delay)
 // true  = steps always run in order, but once the next matchload won't fit it skips to the toggle + park, so
 //         those always happen before 60 s (the full list of 6 matchloads needs ~80 s, it can't all fit).
 // false = never skips; whatever isn't done at 60 s just doesn't happen (usually the toggle + park).
@@ -1011,7 +1154,7 @@ constexpr bool SKILLS_USE_TIME_GUARD = true;
 const AutonRoute SKILLS_ROUTE = {
     -AUTON_START_X, -AUTON_START_Y, std::fmod(AUTON_START_HEADING + 180.0, 360.0),
     SKILLS_GOAL_A_X, SKILLS_GOAL_A_Y,
-    AUTON_PRELOAD_TURN_LESS_DEG, AUTON_PRELOAD_EXTRA_DIST,
+    AUTON_PRELOAD_TURN_LESS_DEG, SKILLS_A_PRELOAD_EXTRA_DIST,
     -AUTON_PIN1_X, -AUTON_PIN1_Y, std::fmod(AUTON_PIN1_APPROACH_HEADING + 180.0, 360.0),
     AUTON_PIN1_GRAB_TURN_OFFSET, AUTON_PIN1_GRAB_EXTRA_DIST, AUTON_PIN1_SCORE_TURN_LESS, AUTON_PIN1_SCORE_EXTRA_DIST,
     -AUTON_PIN2_X, -AUTON_PIN2_Y, std::fmod(AUTON_PIN2_APPROACH_HEADING + 180.0, 360.0),
@@ -1021,10 +1164,13 @@ const AutonRoute SKILLS_ROUTE = {
 uint32_t skillsStartMs = 0;
 
 // True if a step that takes neededMs still leaves time for the toggle + park
+double skillsSlowerThanSim = 1.0;   // real goal A cycle / SKILLS_SIM_A_CYCLE_MS (at least 1), set after the goal A loads
+
 bool skillsHaveTime(uint32_t neededMs) {
     if (!SKILLS_USE_TIME_GUARD) return true;
     uint32_t elapsed = pros::millis() - skillsStartMs;
-    return elapsed + neededMs + SKILLS_END_RESERVE_MS + SKILLS_SAFETY_MS <= SKILLS_TIME_LIMIT_MS;
+    uint32_t endReserve = static_cast<uint32_t>(SKILLS_END_RESERVE_MS * skillsSlowerThanSim);
+    return elapsed + neededMs + endReserve + SKILLS_SAFETY_MS <= SKILLS_TIME_LIMIT_MS;
 }
 
 // Drives straight along `heading` (both sides same speed, no turning). + distance = forward, - = backward.
@@ -1075,6 +1221,94 @@ void skillsSmallLift(double rise, uint32_t maxWaitMs = PIN_LIFT_TIMEOUT_MS) {
     dr4bManualMode = false;
 }
 
+// Next to the loader the bottom wall is only 3.2" from the robot's side even when it's square (the loader line is
+// 11.55" from the wall, the robot is 8.39" from its center to its side). Any angle swings a front or back corner
+// closer. This is the most the robot may be angled off square (degrees) when its center is `above` inches above the
+// loader line, so its lowest corner stays SKILLS_LOADER_WALL_SPARE off the wall. (40 at most.)
+// wallSpare: how close the corners may get to the bottom wall (the way out uses SKILLS_LOADER_EXIT_WALL_SPARE)
+double skillsLoaderMaxAngle(double above, double wallSpare = SKILLS_LOADER_WALL_SPARE) {
+    const double room = (SKILLS_LOADER_LINE_Y + FIELD_HALF) - wallSpare + above;   // center to wall, minus spare
+    double best = 0.0;
+    for (int deg = 0; deg <= 40; deg++) {
+        double a = deg * PI / 180.0;
+        double reach = std::max(ROBOT_CENTER_TO_FRONT, ROBOT_CENTER_TO_BACK) * std::sin(a) + (ROBOT_WIDTH / 2.0) * std::cos(a);
+        if (reach > room) break;
+        best = deg;
+    }
+    return best;
+}
+
+// Lift height for a stack spot on our alliance goal: spots 1-5 from main.cpp's list, spot 6 = SKILLS_STACK_HEIGHT_6
+double skillsStackHeight(int spot) {
+    return spot >= 6 ? SKILLS_STACK_HEIGHT_6 : getStackHeight(GOAL_ALLIANCE, spot);
+}
+
+// A pickup: the robot is stopped with the claw on the pin. Exactly SKILLS_PICKUP_MS, every time: the claw spins at full
+// speed, and in the last SKILLS_PICKUP_LIFT_MS the lift kicks up `rise` degrees at full power. No stall check, no
+// waiting for the lift: the lift PID finishes the rise (if it isn't done) while the robot drives off.
+// resetJump > 0: also does a field-aware wall reset (fieldAwareReset) at the start, inside the fixed pickup time,
+// so it costs nothing
+void skillsPickup(double rise, double resetJump = 0.0) {
+    const uint32_t t0 = pros::millis();
+    skillsPickupCount++;
+    autonClawStopAtMs = 0;
+    autonClawSlowAtMs = 0;
+    claw.move_velocity(200);
+    if (resetJump > 0.0) fieldAwareReset(resetJump);
+    while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_PICKUP_MS - SKILLS_PICKUP_LIFT_MS)) {
+        autonTick();
+        pros::delay(10);
+    }
+    autonLiftGrounding = false;
+    const double liftGoal = getDR4BPosition() + rise;
+    pinLiftCount++;
+    dr4bSettling = false;
+    dr4bManualMode = true;
+    DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    DR4B.move_voltage(PIN_LIFT_VOLTAGE);
+    while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_PICKUP_MS)) {
+        autonTick();
+        pros::delay(10);
+    }
+    dr4bTarget = std::max(getDR4BPosition(), liftGoal);   // holds there (keeps going up if it isn't there yet)
+    dr4bTargetForced = true;
+    dr4bManualMode = false;
+    claw.move_velocity(AUTON_CLAW_HOLD_SPEED);   // keeps squeezing gently while it carries the pin
+    skillsWatchPin(true);                        // holding now: check it really has the pin (SKILLS_PIN_HELD_RPM)
+}
+
+// Waits until the robot has really stopped (under SKILLS_SETTLE_SPEED in/s, at most SKILLS_SETTLE_MAX_MS), so a
+// turn in place starts where the robot is supposed to be instead of sliding on past it
+void skillsSettle() {
+    chassis.tank(0, 0, true);
+    Pose last = chassis.getPose();
+    const uint32_t t0 = pros::millis();
+    while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_SETTLE_MAX_MS)) {
+        autonTick();
+        pros::delay(20);
+        Pose p = chassis.getPose();
+        double speed = std::hypot(p.x - last.x, p.y - last.y) / 0.02;
+        last = p;
+        if (speed < SKILLS_SETTLE_SPEED) break;
+    }
+}
+
+// Stall check for the drive loops: true once the robot has moved less than SKILLS_STALL_MOVE in the last
+// SKILLS_STALL_MS (after the first 2 x SKILLS_STALL_MS of the drive). Call it once per loop.
+struct SkillsStallCheck {
+    uint32_t start = pros::millis(), mark = pros::millis();
+    Pose markPose = chassis.getPose();
+    bool stuck() {
+        uint32_t now = pros::millis();
+        if (now - mark < static_cast<uint32_t>(SKILLS_STALL_MS)) return false;
+        Pose p = chassis.getPose();
+        bool moved = std::hypot(p.x - markPose.x, p.y - markPose.y) >= SKILLS_STALL_MOVE;
+        mark = now;
+        markPose = p;
+        return !moved && now - start >= static_cast<uint32_t>(2 * SKILLS_STALL_MS);
+    }
+};
+
 // ---------------------------------------------------------------------
 // CONTINUOUS DRIVING (skills): no stopping to aim or settle between moves
 // ---------------------------------------------------------------------
@@ -1101,6 +1335,12 @@ void skillsAimAt(double x, double y, bool forwards, int turnSpeed = SKILLS_TURN_
     Pose p = chassis.getPose();
     double err = skillsWrap(skillsBearing(x, y, forwards) - p.theta);
     if (std::fabs(err) > SKILLS_AIM_SKIP_DEG) {
+        if (std::fabs(err) > SKILLS_SETTLE_TURN_DEG && skillsRollSpeed == 0.0) {
+            skillsSettle();   // big turn in place: from a full stop, right where it should be
+            fieldAwareReset(SKILLS_RESET_JUMP);
+            p = chassis.getPose();
+            err = skillsWrap(skillsBearing(x, y, forwards) - p.theta);
+        }
         int maxSpeed = getDR4BPosition() > SKILLS_TALL_LIFT_DEG ? SKILLS_TALL_TURN_SPEED : turnSpeed;
         chassis.turnToHeading(p.theta + err, 1200,
                               {.maxSpeed = maxSpeed,
@@ -1115,19 +1355,21 @@ void skillsAimAt(double x, double y, bool forwards, int turnSpeed = SKILLS_TURN_
 //   forwards:   false = backs toward the point
 //   stopShort:  stops this many inches before the point (claw reach when scoring, 0 for a waypoint)
 //   endSpeed:   0 = slows down and stops at the end. > 0 = doesn't stop, hands off to the next move still rolling.
-//   liftNeeded: > 0 = in the last SKILLS_LIFT_GATE_DIST inches it creeps if the lift isn't that high yet, and only
-//               stops right at the goal if it still isn't (so the pin never hits the goal). 0 = ignore the lift.
+//   liftNeeded: not used any more (it never waits for the lift); kept so the calls stay the same
 // Gentle speed-up / slow-down when the lift is tall, same as skillsRampDrive (anti-tip).
 void skillsDriveToPoint(double x, double y, bool forwards, int maxSpeed, double stopShort,
                         int endSpeed, double liftNeeded, uint32_t timeoutMs) {
     const int dir = forwards ? 1 : -1;
     double speed = (skillsRollSpeed * dir > 0.0) ? std::fabs(skillsRollSpeed) : 0.0;   // keep rolling from the last move
     double aim = skillsBearing(x, y, forwards);
-    uint32_t gateStart = 0;
+    (void)liftNeeded;
+    SkillsStallCheck stall;
 
     uint32_t t0 = pros::millis();
     while (pros::millis() - t0 < timeoutMs) {
+        if (skillsAbortOnLost && skillsPinLost) { endSpeed = 0; break; }   // carrying a pin that isn't there: stop
         Pose p = chassis.getPose();
+        if (stall.stuck()) break;   // stopped moving: it's touching something, so it doesn't push
 
         // Inside 6" it keeps its last heading so it can't spin around the point
         if (std::hypot(x - p.x, y - p.y) > 6.0) aim = skillsBearing(x, y, forwards);
@@ -1139,22 +1381,12 @@ void skillsDriveToPoint(double x, double y, bool forwards, int maxSpeed, double 
 
         bool tall = getDR4BPosition() > SKILLS_TALL_LIFT_DEG;
         double prev = speed;
-        // Speed limit from the lift height (and the lift gate below). The robot is never made to drop
+        // Speed limit from the lift height. The robot is never made to drop
         // below this limit faster than SKILLS_BRAKE_PER_TICK, so a lift going tall mid-drive can't slam it.
         double limit = tall ? std::min(static_cast<double>(maxSpeed), SKILLS_TALL_MAX_SPEED) : static_cast<double>(maxSpeed);
         // Distance slow-down at the end (already gentle by itself)
         double stopCap = SKILLS_MIN_DRIVE_SPEED + (tall ? SKILLS_DECEL_TALL : SKILLS_DECEL) * remaining;
         if (endSpeed > 0) stopCap = std::max(stopCap, static_cast<double>(endSpeed));
-
-        // Lift not up yet right at the goal: creep, and only stop in the last inch if it's still not there
-        // (never waits more than SKILLS_LIFT_GATE_MAX_MS in total)
-        if (liftNeeded > 0.0 && remaining < SKILLS_LIFT_GATE_DIST
-            && getDR4BPosition() < liftNeeded - SKILLS_LIFT_GATE_TOL) {
-            if (gateStart == 0) gateStart = pros::millis();
-            if (pros::millis() - gateStart < static_cast<uint32_t>(SKILLS_LIFT_GATE_MAX_MS)) {
-                limit = std::min(limit, (remaining < 1.0) ? 0.0 : static_cast<double>(SKILLS_LIFT_CREEP_SPEED));
-            }
-        }
 
         double maxDrop = tall ? SKILLS_BRAKE_PER_TICK_TALL : SKILLS_BRAKE_PER_TICK;
         limit = std::max(limit, prev - maxDrop);   // ease down to a new limit instead of slamming
@@ -1177,6 +1409,26 @@ void skillsDriveToPoint(double x, double y, bool forwards, int maxSpeed, double 
     }
 }
 
+// Like skillsDriveToPoint with a full stop, but it really ends ON the point: it waits until the robot has stopped,
+// and if it slid past (or stopped short) by more than SKILLS_PRECISE_TOL it drives that bit back, slowly and dead
+// straight. Used for the spots where it then turns in place near a wall or goal (the turn spot T).
+void skillsDriveToPointPrecise(double x, double y, bool forwards, uint32_t timeoutMs) {
+    skillsDriveToPoint(x, y, forwards, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, timeoutMs);
+    skillsSettle();
+    // Standing still at T: X / Y from the walls (the bottom wall gives how far it is from the loader line), so the
+    // steer onto the loader line starts from where it really is. Field-aware: RW's localizeWithWalls skipped every
+    // reading here (all inside its 18" corner margin)
+    fieldAwareReset(SKILLS_RESET_JUMP);
+    Pose p = chassis.getPose();
+    double h = p.theta * PI / 180.0;
+    double along = (x - p.x) * std::sin(h) + (y - p.y) * std::cos(h);   // + = the spot is ahead of it
+    if (std::fabs(along) > SKILLS_PRECISE_TOL) {
+        skillsRampDrive(along, p.theta, SKILLS_PRECISE_SPEED, 600);
+        skillsSettle();
+        fieldAwareReset(SKILLS_RESET_JUMP);
+    }
+}
+
 // Backs straight off along the current heading (no turning). endSpeed as above.
 void skillsBackStraight(double dist, int endSpeed) {
     Pose p = chassis.getPose();
@@ -1185,60 +1437,94 @@ void skillsBackStraight(double dist, int endSpeed) {
                        SKILLS_DRIVE_SPEED, 0.0, endSpeed, 0.0, 1500);
 }
 
-// Scores what the claw is holding on a goal, with no stops on the way:
-// turns toward the goal while rolling (lift goes partway up), drives at it steering the whole way (lift goes the
-// rest of the way up), stops with the claw over the goal, lets go, and backs straight off.
-//   preloadStyle = true: lowers onto the goal to AUTON_PRELOAD_DROP_HEIGHT first, then opens (preload / pin-only load)
+// Scores what the claw is holding on a goal. No waiting for the lift anywhere:
+//   lift up to SKILLS_TURN_LIFT_MAX while it turns toward the goal, then all the way up while it drives there,
+//   and the moment the claw is over the goal it lowers and lets go, waits a fixed release time and backs straight off.
+//   preloadStyle = true: lowers onto the goal for SKILLS_PRELOAD_LOWER_MS, then opens (the preload)
 //   backupDist / backupEndSpeed: how far it backs off, and whether it keeps rolling into the next move
-void skillsScoreOnGoal(double goalX, double goalY, double height, double extraDist, bool preloadStyle,
-                       double backupDist, int backupEndSpeed) {
+//   turnSpeed: top speed for the turn toward the goal (the tall-lift turn speed takes over if the lift is tall)
+//   preloadLowerMs: preload style only, how long it lowers onto the goal before opening
+// A pickup missed (the pin check): stop, open the claw (in case the check was wrong, so nothing is dragged along),
+// lift all the way down, and back straight off the goal until it has room to turn without touching it.
+void skillsDropMissedPin(double goalX, double goalY) {
+    skillsAbortOnLost = false;
+    chassis.cancelMotion();
+    chassis.tank(0, 0, true);
+    skillsRollSpeed = 0.0;
+    autonOpenClaw();
+    autonStartGrounding();
+    Pose p = chassis.getPose();
+    const double room = ROBOT_HALF_DIAG + GOAL_HALF + SKILLS_TURN_SPARE;   // center to goal center to turn in place
+    double d = std::hypot(goalX - p.x, goalY - p.y);
+    if (d < room) skillsBackStraight(room - d + 0.5, 0);   // it faces the goal on the way in, so backing moves away
+}
+
+// Returns true if it scored. Carrying a pin (not preload style), it stops as soon as the pin check says the claw is
+// empty, then skillsDropMissedPin and returns false (the stack spot stays free for the next pin).
+bool skillsScoreOnGoal(double goalX, double goalY, double height, double extraDist, bool preloadStyle,
+                       double backupDist, int backupEndSpeed, int turnSpeed = SKILLS_MATCHLOAD_TURN_SPEED,
+                       int preloadLowerMs = SKILLS_PRELOAD_LOWER_MS) {
     autonGoalX = goalX;
     autonGoalY = goalY;
+    skillsAbortOnLost = skillsPinWatch;   // only while it's carrying a picked-up pin (not the preload)
+    auto lost = [&] {
+        if (!(skillsAbortOnLost && skillsPinLost)) return false;
+        skillsDropMissedPin(goalX, goalY);
+        return true;
+    };
 
     const double stopShort = AUTON_CLAW_REACH - extraDist;   // robot center stops here, claw over the goal
 
-    // Low lift for the turn and the fast part of the drive (anti-tip)
-    autonSetLift(std::min(height, SKILLS_DRIVE_LIFT_MAX));
-    skillsAimAt(goalX, goalY, true, preloadStyle ? SKILLS_TURN_SPEED : SKILLS_MATCHLOAD_TURN_SPEED);
-
-    if (height > SKILLS_DRIVE_LIFT_MAX) {
-        // 1. Fast to SKILLS_RAISE_DIST before the score spot, slowing to SKILLS_FINAL_SPEED (doesn't stop)
+    autonSetLift(std::min(height, SKILLS_TURN_LIFT_MAX));
+    skillsAimAt(goalX, goalY, true, turnSpeed);
+    if (lost()) return false;
+    if (height > SKILLS_TURN_LIFT_MAX) {
+        // Tall stack spot: full speed with the lift at SKILLS_TURN_LIFT_MAX until it's just far enough out that the
+        // lift can finish the climb on the way in (SKILLS_LIFT_DEG_PER_S, at the tall-lift speed), then the rest of
+        // the way up and in at the tall-lift speeds. Nothing waits for the lift.
+        double raiseDist = (height - SKILLS_TURN_LIFT_MAX) / SKILLS_LIFT_DEG_PER_S * SKILLS_TALL_IN_PER_S + SKILLS_RAISE_SPARE;
         Pose p = chassis.getPose();
-        if (std::hypot(goalX - p.x, goalY - p.y) > stopShort + SKILLS_RAISE_DIST + 1.0) {
-            skillsDriveToPoint(goalX, goalY, true, SKILLS_DRIVE_SPEED, stopShort + SKILLS_RAISE_DIST,
-                               SKILLS_FINAL_SPEED, 0.0, 3000);
+        if (std::hypot(goalX - p.x, goalY - p.y) > stopShort + raiseDist + 2.0) {
+            skillsDriveToPoint(goalX, goalY, true, SKILLS_DRIVE_SPEED, stopShort + raiseDist,
+                               static_cast<int>(SKILLS_TALL_MAX_SPEED), 0.0, 3000);
+            if (lost()) return false;
         }
-        // 2. Rest of the way slowly while the lift goes the rest of the way up
-        autonSetLift(height);
-        skillsDriveToPoint(goalX, goalY, true, SKILLS_FINAL_SPEED, stopShort, 0, height, 3000);
-    } else {
-        skillsDriveToPoint(goalX, goalY, true, SKILLS_DRIVE_SPEED, stopShort, 0, height, 3000);
     }
+    autonSetLift(height);   // the rest of the way up while it drives in (about 1 s to the top)
+    skillsDriveToPoint(goalX, goalY, true, SKILLS_DRIVE_SPEED, stopShort, 0, 0.0, 3000);
+    if (lost()) return false;
+    skillsAbortOnLost = false;
 
+    uint32_t releaseMs = SKILLS_RELEASE_MS;
     if (preloadStyle) {
-        // Lower onto the goal, then open (the lift drops fast; this is a safety limit, not a wait)
         autonSetLift(AUTON_PRELOAD_DROP_HEIGHT);
         uint32_t t0 = pros::millis();
-        while (getDR4BPosition() > AUTON_PRELOAD_DROP_HEIGHT + AUTON_LIFT_TOLERANCE
-               && pros::millis() - t0 < static_cast<uint32_t>(SKILLS_DROP_MAX_MS)) {
+        while (pros::millis() - t0 < static_cast<uint32_t>(preloadLowerMs)) {
             autonTick();
             pros::delay(10);
         }
         autonOpenClaw(AUTON_PRELOAD_CLAW_OPEN_MS);
+        releaseMs = SKILLS_PRELOAD_RELEASE_MS;
     } else {
         autonLowerLiftCoast(AUTON_LOW_HEIGHT);
+        uint32_t t0 = pros::millis();
+        while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_RELEASE_DELAY_MS)) {   // lowers onto the goal first
+            autonTick();
+            pros::delay(10);
+        }
         autonOpenClaw();
     }
 
-    // Short pause so the claw is actually off the pin before backing away (otherwise it drags the pin off the goal)
+    // Fixed release time so the claw is off the pin before it backs away (otherwise it drags the pin off the goal)
     uint32_t r0 = pros::millis();
-    const uint32_t releaseMs = preloadStyle ? SKILLS_PRELOAD_RELEASE_MS : SKILLS_RELEASE_MS;
+    fieldAwareReset(SKILLS_RESET_JUMP);   // standing still at the goal: inside the fixed release time, so it costs nothing
     while (pros::millis() - r0 < releaseMs) {
         autonTick();
         pros::delay(10);
     }
 
     skillsBackStraight(backupDist, backupEndSpeed);
+    return true;
 }
 
 // To the matchloader and into it, nothing ever touches the field:
@@ -1254,15 +1540,16 @@ void skillsDriveIntoLoader(int clawSpeed, bool forwards) {
     Pose p = chassis.getPose();
     if (std::hypot(SKILLS_LOADER_TURN_X - p.x, SKILLS_LOADER_TURN_Y - p.y) > 3.0) {
         skillsAimAt(SKILLS_LOADER_TURN_X, SKILLS_LOADER_TURN_Y, forwards, SKILLS_EMPTY_TURN_SPEED);
-        skillsDriveToPoint(SKILLS_LOADER_TURN_X, SKILLS_LOADER_TURN_Y, forwards, SKILLS_DRIVE_SPEED, 0.0,
-                           0, 0.0, 2500);   // stops ON T (rolling past it put a corner on goal B when it turned)
+        skillsDriveToPointPrecise(SKILLS_LOADER_TURN_X, SKILLS_LOADER_TURN_Y, forwards, 2500);   // stops ON T
     }
 
     // Heading that steers it down onto the loader line: SKILLS_LINEUP_STEER degrees per inch above the line,
     // never steeper than SKILLS_LINEUP_MIN_HEADING, and dead square (270) from P in
     auto lineupAim = [](const Pose& q) {
         if (q.x <= SKILLS_LOADER_LINEUP_X) return 270.0;
-        return std::clamp(270.0 - SKILLS_LINEUP_STEER * (q.y - SKILLS_LOADER_Y), SKILLS_LINEUP_MIN_HEADING, 270.0);
+        double above = std::max(0.0, q.y - SKILLS_LOADER_LINE_Y);
+        double minHeading = std::max(SKILLS_LINEUP_MIN_HEADING, 270.0 - skillsLoaderMaxAngle(above));
+        return std::clamp(270.0 - SKILLS_LINEUP_STEER * (q.y - SKILLS_LOADER_LINE_Y), minHeading, 270.0);
     };
 
     // 2. Turn at T toward the loader line (T has room to turn)
@@ -1276,107 +1563,159 @@ void skillsDriveIntoLoader(int clawSpeed, bool forwards) {
     autonClawStopAtMs = 0;
     autonClawSlowAtMs = 0;
     claw.move_velocity(clawSpeed);
-    double speed = 0.0;
-    uint32_t t0 = pros::millis();
-    while (pros::millis() - t0 < 2500) {
+    // Drives in along the loader line until the center reaches stopX. inSpeed: top speed once on the line.
+    auto driveIn = [&](double stopX, double inSpeed) {
+        double speed = 0.0;
+        SkillsStallCheck stall;
+        uint32_t t0 = pros::millis();
+        while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_LOADER_IN_MAX_MS)) {
+            Pose q = chassis.getPose();
+            if (stall.stuck()) break;   // stopped short (touching the loader?): never pushes, the pickup starts right away
+            double remaining = q.x - stopX;
+            if (remaining <= SKILLS_LOADER_ROLL) break;
+            double top = q.x > SKILLS_LOADER_LINEUP_X ? SKILLS_LINEUP_SPEED : inSpeed;
+            if (std::fabs(skillsWrap(lineupAim(q) - q.theta)) > 5.0) top = std::min(top, static_cast<double>(SKILLS_LOADER_TURNING_SPEED));
+            speed = std::min({speed + SKILLS_ACCEL, top, SKILLS_MIN_DRIVE_SPEED + SKILLS_DECEL * remaining});
+            double corr = std::clamp(SKILLS_LOADER_STEER_KP * skillsWrap(lineupAim(q) - q.theta), -SKILLS_LOADER_STEER_MAX, SKILLS_LOADER_STEER_MAX);
+            chassis.tank(static_cast<int>(speed + corr), static_cast<int>(speed - corr), true);
+            autonTick();
+            pros::delay(10);
+        }
+        chassis.tank(0, 0, true);
+    };
+
+    if (skillsClearLoaderNext) {
+        // The last matchload missed: clear the loader area first (see SKILLS_LOADER_CLEAR_SHORT)
+        skillsClearLoaderNext = false;
+        driveIn(SKILLS_LOADER_GRAB_X + SKILLS_LOADER_CLEAR_SHORT, SKILLS_LOADER_DRIVE_IN_SPEED);
+        skillsSettle();
+        // Biggest right turn that keeps every corner SKILLS_LOADER_CLEAR_WALL_SPARE off the bottom wall and the loader
         Pose q = chassis.getPose();
-        double remaining = q.x - SKILLS_LOADER_GRAB_X;
-        if (remaining <= SKILLS_LOADER_ROLL) break;
-        double top = q.x > SKILLS_LOADER_LINEUP_X ? SKILLS_LINEUP_SPEED : SKILLS_LOADER_DRIVE_IN_SPEED;
-        speed = std::min({speed + SKILLS_ACCEL, top, SKILLS_MIN_DRIVE_SPEED + SKILLS_DECEL * remaining});
-        double corr = std::clamp(SKILLS_STEER_KP * skillsWrap(lineupAim(q) - q.theta), -SKILLS_STEER_MAX, SKILLS_STEER_MAX);
-        chassis.tank(static_cast<int>(speed + corr), static_cast<int>(speed - corr), true);
+        double turn = 0.0;
+        for (double deg = 1.0; deg <= SKILLS_LOADER_CLEAR_MAX_DEG; deg += 1.0) {
+            double h = (q.theta + deg) * PI / 180.0;
+            double fx = std::sin(h), fy = std::cos(h), rx = std::cos(h), ry = -std::sin(h);   // forward, right
+            bool fits = true;
+            for (double side : {-1.0, 1.0}) {
+                for (double along : {ROBOT_CENTER_TO_FRONT, -ROBOT_CENTER_TO_BACK}) {
+                    double cx = q.x + along * fx + side * (ROBOT_WIDTH / 2.0) * rx;
+                    double cy = q.y + along * fy + side * (ROBOT_WIDTH / 2.0) * ry;
+                    if (cy < -FIELD_HALF + SKILLS_LOADER_CLEAR_WALL_SPARE) fits = false;                // bottom wall
+                    if (cx < SKILLS_LOADER_FACE_X + SKILLS_LOADER_CLEAR_WALL_SPARE) fits = false;       // loader / left wall
+                }
+            }
+            if (!fits) break;
+            turn = deg;
+        }
+        if (turn > 0.0) {
+            // Right until it has turned `turn` degrees, then back square, driving the wheels directly
+            const double start = q.theta;
+            uint32_t tt = pros::millis();
+            while (chassis.getPose().theta < start + turn - SKILLS_LOADER_CLEAR_COAST_DEG && pros::millis() - tt < 800) {
+                chassis.tank(SKILLS_LOADER_CLEAR_TURN_SPEED, -SKILLS_LOADER_CLEAR_TURN_SPEED, true);
+                autonTick();
+                pros::delay(10);
+            }
+            tt = pros::millis();
+            while (chassis.getPose().theta > start + 0.5 && pros::millis() - tt < 800) {
+                chassis.tank(-SKILLS_LOADER_CLEAR_TURN_SPEED, SKILLS_LOADER_CLEAR_TURN_SPEED, true);
+                autonTick();
+                pros::delay(10);
+            }
+            chassis.tank(0, 0, true);
+        }
+        driveIn(SKILLS_LOADER_GRAB_X, SKILLS_LOADER_CLEAR_IN_SPEED);   // quickly the rest of the way in
+    } else {
+        driveIn(SKILLS_LOADER_GRAB_X, SKILLS_LOADER_DRIVE_IN_SPEED);
+    }
+    skillsRollSpeed = 0.0;
+}
+
+// Out of the loader and back to the turn spot T in one backing drive, no stops: dead straight back for
+// SKILLS_LOADER_EXIT_STRAIGHT (the front corners are right next to the loader), then it climbs away from the bottom
+// wall toward T, facing between 270 and SKILLS_LINEUP_MIN_HEADING (the shallower the closer it is to the wall, so the
+// corners stay at least 2" off it), and stops on T. (It used to back to P and then steer at T: that curve ended
+// about 1.3" below T, so the turn at T started 1.2" from the wall.) The lift starts going up once it's clear of the loader.
+void skillsBackOutOfLoader(double liftTo) {
+    double speed = 0.0;
+    bool liftStarted = false;
+    SkillsStallCheck stall;
+    uint32_t t0 = pros::millis();
+    while (pros::millis() - t0 < 2000) {
+        Pose q = chassis.getPose();
+        if (stall.stuck()) break;
+        double remaining = SKILLS_LOADER_TURN_X - q.x;   // backing toward +X
+        if (remaining <= 0.3) break;
+        if (!liftStarted && q.x >= SKILLS_LOADER_LINEUP_X) {
+            autonSetLift(liftTo);
+            liftStarted = true;
+        }
+        double o = q.y - SKILLS_LOADER_LINE_Y;   // inches above the loader line
+        double facing = 270.0;
+        if (q.x > SKILLS_LOADER_GRAB_X + SKILLS_LOADER_EXIT_STRAIGHT) {
+            // climbs as steeply as the wall allows (skillsLoaderMaxAngle, less near the wall) up to T's height,
+            // then straight back
+            double climb = (o >= SKILLS_LOADER_TURN_Y - SKILLS_LOADER_LINE_Y - 0.2)
+                               ? 0.0 : skillsLoaderMaxAngle(std::max(0.0, o), SKILLS_LOADER_EXIT_WALL_SPARE);
+            facing = 270.0 - climb;
+        }
+        bool tall = getDR4BPosition() > SKILLS_TALL_LIFT_DEG;
+        double top = tall ? SKILLS_TALL_MAX_SPEED : static_cast<double>(SKILLS_DRIVE_SPEED);
+        // slow while it's still climbing, so it can turn as fast as it moves (at full speed it reached T 1.3" low)
+        if (std::fabs(skillsWrap(facing - q.theta)) > 5.0 || facing != 270.0)
+            top = std::min(top, static_cast<double>(SKILLS_LOADER_CLIMB_SPEED));
+        speed = std::min({speed + (tall ? SKILLS_ACCEL_TALL : SKILLS_ACCEL), top,
+                          SKILLS_MIN_DRIVE_SPEED + (tall ? SKILLS_DECEL_TALL : SKILLS_DECEL) * remaining});
+        double corr = std::clamp(SKILLS_LOADER_STEER_KP * skillsWrap(facing - q.theta), -SKILLS_LOADER_STEER_MAX, SKILLS_LOADER_STEER_MAX);
+        chassis.tank(static_cast<int>(-speed + corr), static_cast<int>(-speed - corr), true);
         autonTick();
         pros::delay(10);
     }
     chassis.tank(0, 0, true);
+    if (!liftStarted) autonSetLift(liftTo);
     skillsRollSpeed = 0.0;
+    skillsSettle();
+    fieldAwareReset(SKILLS_RESET_JUMP);   // standing still at T: fix X / Y before the turn toward the goal
 }
 
-// Out of the loader the same way it came in: dead straight back along the loader line to P, then straight back
-// to T (still rolling), where skillsScoreOnGoal turns it toward the goal. The lift is already up SKILLS_LOAD_RISE;
-// it starts going up the rest of the way once the robot is out at P.
-void skillsBackOutOfLoader(double liftTo) {
-    skillsBackStraight(chassis.getPose().x <= SKILLS_LOADER_LINEUP_X ? SKILLS_LOADER_LINEUP_X - chassis.getPose().x : 0.0,
-                       SKILLS_ROLL_SPEED);
-    autonSetLift(liftTo);
-    skillsDriveToPoint(SKILLS_SCORE_SPOT_X, SKILLS_SCORE_SPOT_Y, false, SKILLS_DRIVE_SPEED, 0.0,
-                       0, 0.0, 1500);   // stops ON T, so the turn toward the goal can't swing a corner into goal B
-}
-
-// One matchload (pin + cup): into the loader spinning, hold, small lift, out, score on (goalX, goalY)
+// One matchload (pin + cup): into the loader with the claw spinning, the fixed pickup, out, score on (goalX, goalY)
 // fromLoaderTrip: true = it's arriving from the first trip (drives forwards), false = right after scoring (backs)
-// Always returns true (kept so the loop below stays simple).
-bool skillsMatchloadCycle(double goalX, double goalY, int stack, double extraDist, bool fromLoaderTrip) {
-    double height = getStackHeight(GOAL_ALLIANCE, stack);
+// It always goes and scores (no going back to the loader if it missed: it acts as if it has the pin).
+// Always returns true (kept so the loops below stay simple).
+// slowLower: scores it like the first preload (lowers onto the goal at SKILLS_FIRST_PRELOAD_SLEW_DOWN, then opens)
+bool skillsMatchloadCycle(double goalX, double goalY, int stack, double extraDist, bool fromLoaderTrip,
+                          bool slowLower = false) {
+    double height = skillsStackHeight(stack);
 
     skillsDriveIntoLoader(AUTON_APPROACH_CLAW_SPEED, fromLoaderTrip);
 
-    // Hold at the loader with the claw spinning (the only long wait besides the start toggle).
-    // Then always goes to score, even if it missed (no going back to the loader).
-    // The robot is standing still here, so it's a good moment for the distance sensors to check its position.
-    // Ends early once the claw stalls on the pin (after SKILLS_MATCHLOAD_MIN_HOLD_MS), same check as the field grab.
-    localizeWithWalls();
-    uint32_t holdStart = pros::millis(), slowStart = 0;
-    while (pros::millis() - holdStart < static_cast<uint32_t>(SKILLS_MATCHLOAD_HOLD_MS)) {
-        uint32_t now = pros::millis();
-        if (std::fabs(claw.get_actual_velocity()) < CLAW_STALL_SPEED) {
-            if (slowStart == 0) slowStart = now;
-            if (now - holdStart >= static_cast<uint32_t>(SKILLS_MATCHLOAD_MIN_HOLD_MS)
-                && now - slowStart >= static_cast<uint32_t>(CLAW_STALL_CONFIRM_MS)) break;
-        } else {
-            slowStart = 0;
-        }
-        autonTick();
-        pros::delay(10);
-    }
+    // The fixed 1.5 s pickup, standing still at the loader: X / Y from the bottom and left walls during it (RW's
+    // localizeWithWalls skipped every reading here, they're all inside its 18" corner margin)
+    skillsPickup(SKILLS_LOAD_RISE, SKILLS_RESET_JUMP);
 
-    // Lift a little, slow the claw, back out (lift heads up on the way), score, back off still rolling
-    skillsSmallLift(SKILLS_LOAD_RISE, SKILLS_LOAD_RISE_WAIT_MS);
-    claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
     skillsBackOutOfLoader(std::min(height, SKILLS_TURN_LIFT_MAX));
-    skillsScoreOnGoal(goalX, goalY, height, extraDist, false, SKILLS_SCORE_BACKUP, SKILLS_ROLL_SPEED);
-    return true;
-}
-
-// Pin-only load for goal B: claw open going in, stops open under the loader, closes on the pin, scores like the preload
-void skillsPinOnlyCycle() {
-    skillsDriveIntoLoader(-200, false);   // claw spins open while driving in (backs off goal A to the turn spot first)
-    claw.move_velocity(0);         // stops open, right under the loader
-
-    uint32_t waitStart = pros::millis();
-    while (pros::millis() - waitStart < static_cast<uint32_t>(SKILLS_PIN_ONLY_WAIT_MS)) {
-        autonTick();
-        pros::delay(10);
+    // Out of the loader (standing on T): if the pin check already says the claw is empty, drop here (not inside the
+    // loader, where it could clog it), lift down, and skip scoring
+    if (skillsPinLost) {
+        autonOpenClaw();
+        autonStartGrounding();
+        skillsClearLoaderNext = true;   // whatever it missed may be lying in front of the loader
+        return false;
     }
-
-    // Close on the pin (same stall check as the field grab, gives up after 400 ms)
-    claw.move_velocity(200);
-    {
-        uint32_t start = pros::millis();
-        bool slow = false;
-        uint32_t slowStart = 0;
-        while (pros::millis() - start < 400) {
-            uint32_t now = pros::millis();
-            double clawSpeed = std::fabs(claw.get_actual_velocity());
-            if (now - start >= CLAW_STALL_GRACE_MS && clawSpeed < CLAW_STALL_SPEED) {
-                if (!slow) { slow = true; slowStart = now; }
-                if (now - slowStart >= CLAW_STALL_CONFIRM_MS) break;
-            } else {
-                slow = false;
-            }
-            autonTick();
-            pros::delay(10);
-        }
+    bool scored;
+    if (slowLower) {
+        // long enough to lower all the way at the slow speed, plus 50 msec (the first preload's 500 for 90 degrees)
+        const int lowerMs = static_cast<int>((height - AUTON_PRELOAD_DROP_HEIGHT) / SKILLS_FIRST_PRELOAD_SLEW_DOWN * 1000.0) + 50;
+        const double normalSlewDown = dr4bSlewDown;
+        dr4bSlewDown = SKILLS_FIRST_PRELOAD_SLEW_DOWN;
+        scored = skillsScoreOnGoal(goalX, goalY, height, extraDist, true, SKILLS_SCORE_BACKUP, SKILLS_ROLL_SPEED,
+                                   SKILLS_MATCHLOAD_TURN_SPEED, lowerMs);
+        dr4bSlewDown = normalSlewDown;
+    } else {
+        scored = skillsScoreOnGoal(goalX, goalY, height, extraDist, false, SKILLS_SCORE_BACKUP, SKILLS_ROLL_SPEED);
     }
-
-    skillsSmallLift(SKILLS_LOAD_RISE, SKILLS_LOAD_RISE_WAIT_MS);
-    claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
-    skillsBackOutOfLoader(AUTON_PRELOAD_CARRY_HEIGHT);
-
-    // Score it on goal B like the preload (carry height, lower onto the goal, open, back off)
-    skillsScoreOnGoal(SKILLS_GOAL_B_X, SKILLS_GOAL_B_Y, AUTON_PRELOAD_CARRY_HEIGHT, SKILLS_B_PRELOAD_EXTRA_DIST,
-                      true, SKILLS_SCORE_BACKUP, SKILLS_ROLL_SPEED);
+    if (!scored) skillsClearLoaderNext = true;   // missed: whatever it missed may be lying in front of the loader
+    return scored;
 }
 
 // Bottom-wall toggle twice (claw first), then straight back to park in the middle
@@ -1431,17 +1770,18 @@ void skillsStartAndPreload(const AutonRoute& r) {
 
     chassis.setPose(r.startX, r.startY, r.startHeading);
     chassis.setBrakeMode(pros::E_MOTOR_BRAKE_BRAKE);
-    localizeWithWalls();   // distance sensors check the start spot (only if use_distance_resets is on)
+    fieldAwareReset(SKILLS_RESET_JUMP);   // distance sensors check the start spot (only if use_distance_resets is on)
 
     autonClawSlowAtMs = 0;
     autonClawStopAtMs = 0;
     claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
 
-    // Motor toggle (2 turns), same as the qual auton
+    // Motor toggle (2 turns), same as the qual auton. The lift gets a fixed SKILLS_TOGGLE_LIFT_HEAD_MS head start
+    // (it's past AUTON_TOGGLE_START_LIFT by then) instead of the code waiting to see it get there
     autonSetLift(AUTON_TOGGLE_LIFT_HEIGHT);
     {
         uint32_t liftStart = pros::millis();
-        while (getDR4BPosition() < AUTON_TOGGLE_START_LIFT && pros::millis() - liftStart < 1000) {
+        while (pros::millis() - liftStart < static_cast<uint32_t>(SKILLS_TOGGLE_LIFT_HEAD_MS)) {
             autonTick();
             pros::delay(10);
         }
@@ -1462,45 +1802,105 @@ void skillsStartAndPreload(const AutonRoute& r) {
     if (pros::millis() - toggleStart >= AUTON_TOGGLE_TIMEOUT_MS) {
         toggleMechanism.move_velocity(0);
     }
+    fieldAwareReset(SKILLS_RESET_JUMP);   // still against the wall: check again (the toggle pushes on the wall toggle)
 
     // Straight forward off the wall first, so the back corners can't hit the wall when it turns toward goal A
     autonSetLift(AUTON_PRELOAD_CARRY_HEIGHT);
     skillsRampDrive(SKILLS_START_FORWARD, r.startHeading, 70, 800);
 
     // Preload onto goal A: turn, drive straight at it (steering the whole way), lower, open, back off
-    skillsScoreOnGoal(r.goalX, r.goalY, AUTON_PRELOAD_CARRY_HEIGHT, SKILLS_A_PRELOAD_EXTRA_DIST,
-                      true, SKILLS_PRELOAD_BACKUP, 0);
+    // (slower lowering for this one, see SKILLS_FIRST_PRELOAD_SLEW_DOWN; the lift PID's lowering speed goes back after)
+    const double normalSlewDown = dr4bSlewDown;
+    dr4bSlewDown = SKILLS_FIRST_PRELOAD_SLEW_DOWN;
+    skillsScoreOnGoal(r.goalX, r.goalY, AUTON_PRELOAD_CARRY_HEIGHT, r.preloadExtraDist,
+                      true, SKILLS_PRELOAD_BACKUP, 0, SKILLS_TURN_SPEED, SKILLS_FIRST_PRELOAD_LOWER_MS);
+    dr4bSlewDown = normalSlewDown;
+}
+
+// Field pin pickup. The robot is stopped facing the pin. One dead-straight drive along `heading` (it only holds the
+// heading, never steers back onto a line: that turned it into pin 2): up to SKILLS_PIN_IN_SPEED, the last
+// SKILLS_PIN_SLOW_DIST at SKILLS_PIN_SLOW_SPEED, and stops with the claw on the pin. The claw starts spinning
+// AUTON_CLAW_OPEN_DIST before.
+// extraDist: + = drives further into the pin, - = stops shorter
+void skillsLineIntoPin(double pinX, double pinY, double heading, double extraDist = 0.0) {
+    const double hx = std::sin(heading * PI / 180.0), hy = std::cos(heading * PI / 180.0);
+    const double grabX = pinX - (AUTON_CLAW_REACH - extraDist) * hx, grabY = pinY - (AUTON_CLAW_REACH - extraDist) * hy;
+    double speed = 0.0;
+    bool clawOn = false;
+    SkillsStallCheck stall;
+    uint32_t t0 = pros::millis();
+    while (pros::millis() - t0 < 2500) {
+        Pose q = chassis.getPose();
+        if (stall.stuck()) break;
+        double remaining = (grabX - q.x) * hx + (grabY - q.y) * hy;      // along the line
+        if (remaining <= 0.3) break;
+        if (!clawOn && remaining <= AUTON_CLAW_OPEN_DIST) {
+            autonClawStopAtMs = 0;
+            autonClawSlowAtMs = 0;
+            claw.move_velocity(AUTON_APPROACH_CLAW_SPEED);
+            clawOn = true;
+        }
+        double aim = heading;   // dead straight: only holds the heading, never steers back onto a line (that turned it
+                                // into pin 2)
+        double pinTop = remaining < SKILLS_PIN_SLOW_DIST ? SKILLS_PIN_SLOW_SPEED : SKILLS_PIN_IN_SPEED;
+        speed = std::min({speed + SKILLS_ACCEL, pinTop,
+                          SKILLS_MIN_DRIVE_SPEED + SKILLS_DECEL * remaining});
+        double corr = std::clamp(SKILLS_STEER_KP * skillsWrap(aim - q.theta), -SKILLS_STEER_MAX, SKILLS_STEER_MAX);
+        chassis.tank(static_cast<int>(speed + corr), static_cast<int>(speed - corr), true);
+        autonTick();
+        pros::delay(10);
+    }
+    chassis.tank(0, 0, true);
+    if (!clawOn) {
+        autonClawStopAtMs = 0;
+        autonClawSlowAtMs = 0;
+        claw.move_velocity(AUTON_APPROACH_CLAW_SPEED);
+    }
+    skillsRollSpeed = 0.0;
+}
+
+// To a field pin and pick it up: stop on its approach line `lineup` inches out, one turn to face along the line,
+// the smooth drive in, then the same fixed pickup as a matchload
+// extraDist: + = drives further into the pin, - = stops shorter (see skillsLineIntoPin)
+// heading: the pin's approach line (where it lines up). It then turns once to face the pin itself from where it
+// really stopped (turnOffset degrees more to the right), and drives dead straight into it.
+void skillsGrabFieldPin(double pinX, double pinY, double heading, double lineup, double extraDist = 0.0,
+                        double turnOffset = 0.0) {
+    const double hx = std::sin(heading * PI / 180.0), hy = std::cos(heading * PI / 180.0);
+    const double lineupX = pinX - lineup * hx, lineupY = pinY - lineup * hy;
+    autonStartGrounding();   // lift all the way down on the way
+    skillsAimAt(lineupX, lineupY, true, SKILLS_EMPTY_TURN_SPEED);
+    skillsDriveToPoint(lineupX, lineupY, true, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, 2500);
+    skillsSettle();
+    fieldAwareReset(SKILLS_RESET_JUMP);   // standing on the pin's line: fix X / Y before lining up into it
+    Pose now = chassis.getPose();
+    const double aim = now.theta + skillsWrap(skillsBearing(pinX, pinY, true) + turnOffset - now.theta);
+    chassis.turnToHeading(aim, 1200,
+                          {.maxSpeed = SKILLS_EMPTY_TURN_SPEED, .minSpeed = AUTON_AIM_MIN_SPEED, .earlyExitRange = AUTON_AIM_EXIT_DEG});
+    autonWaitMotion();
+    skillsLineIntoPin(pinX, pinY, aim, extraDist);
+    skillsPickup(SKILLS_FIELD_PIN_RISE, SKILLS_RESET_JUMP);   // (the reset happens inside the fixed pickup time)
+    fieldMclPinPickedUp(pinX, pinY);   // MCL can use beams past that spot now
 }
 
 // After the preload: both field pins onto goal A (spots 2 and 3). Afterwards the way to the loader is clear.
-void skillsFieldPins(const AutonRoute& r) {
-    // Pin 1: around the right side of goal A to its approach line, then the qual grab (lines up, slow and straight in,
-    // closes, small lift)
-    autonStartGrounding();
-    const double back1 = AUTON_CLAW_REACH + AUTON_PIN1_SLOW_DIST + SKILLS_PIN_LINEUP_BACK;   // 18.5" from the pin
-    const double lineup1X = r.pin1X - back1 * std::sin(r.pin1Heading * PI / 180.0);   // -35.4
-    const double lineup1Y = r.pin1Y - back1 * std::cos(r.pin1Heading * PI / 180.0);   // -9.4
-    skillsAimAt(lineup1X, lineup1Y, true, SKILLS_EMPTY_TURN_SPEED);
-    skillsDriveToPoint(lineup1X, lineup1Y, true, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, 2000);
-    autonGrabPin(r.pin1X, r.pin1Y, r.pin1Heading, r.pin1GrabTurn, r.pin1GrabExtra, AUTON_PIN1_SLOW_DIST,
-                 AUTON_PIN1_APPROACH_SPEED, AUTON_PIN1_SLOW_SPEED, 0);
-    fieldMclPinPickedUp(r.pin1X, r.pin1Y);   // MCL can use beams past that spot now
-    claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
-    // Backs off far enough to turn clear of goal A
-    skillsScoreOnGoal(r.goalX, r.goalY, getStackHeight(GOAL_ALLIANCE, AUTON_PIN1_STACK), r.pin1ScoreExtra, false,
-                      SKILLS_PRELOAD_BACKUP, 0);
+// pinNGrabTurn turns the approach line around the pin (+ = more clockwise), pinNGrabExtra = further into the pin.
+// lastBackup / lastEndSpeed: how it leaves goal A after pin 2 (skills rolls on into the loader cycles)
+// onGoal: how many pins are on the goal already (1: the preload). Each pin goes on the next free spot, so a missed one
+// (the pin check) doesn't leave a gap. Returns how many it scored.
+int skillsFieldPins(const AutonRoute& r, int onGoal, double lastBackup = SKILLS_SCORE_BACKUP,
+                    int lastEndSpeed = SKILLS_ROLL_SPEED) {
+    int scored = 0;
+    skillsGrabFieldPin(r.pin1X, r.pin1Y, r.pin1Heading, SKILLS_PIN1_LINEUP, r.pin1GrabExtra, r.pin1GrabTurn);
+    // Backs off far enough to turn toward pin 2 with room to spare
+    if (skillsScoreOnGoal(r.goalX, r.goalY, skillsStackHeight(onGoal + 1), r.pin1ScoreExtra, false,
+                          SKILLS_PIN1_BACKUP, 0)) scored++;
 
-    // Pin 2: over to the A-B diagonal, then the qual grab coming in from the upper right
-    autonStartGrounding();
-    skillsAimAt(SKILLS_PIN2_WAY_X, SKILLS_PIN2_WAY_Y, true, SKILLS_EMPTY_TURN_SPEED);
-    skillsDriveToPoint(SKILLS_PIN2_WAY_X, SKILLS_PIN2_WAY_Y, true, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, 2000);
-    autonGrabPin(r.pin2X, r.pin2Y, r.pin2Heading, r.pin2GrabTurn, r.pin2GrabExtra, AUTON_PIN2_SLOW_DIST,
-                 127, AUTON_SLOW_SPEED, AUTON_PIN2_EXTRA_CLAW_MS);
-    fieldMclPinPickedUp(r.pin2X, r.pin2Y);
-    claw.move_velocity(AUTON_CLAW_HOLD_SPEED);
-    skillsScoreOnGoal(r.goalX, r.goalY, getStackHeight(GOAL_ALLIANCE, AUTON_PIN2_STACK), r.pin2ScoreExtra, false,
-                      SKILLS_SCORE_BACKUP, SKILLS_ROLL_SPEED);
+    skillsGrabFieldPin(r.pin2X, r.pin2Y, r.pin2Heading, SKILLS_PIN2_LINEUP, r.pin2GrabExtra, r.pin2GrabTurn);
+    if (skillsScoreOnGoal(r.goalX, r.goalY, skillsStackHeight(onGoal + scored + 1), r.pin2ScoreExtra, false,
+                          lastBackup, lastEndSpeed)) scored++;
     // the matchload cycles take it from here (back to the turn spot -> loader)
+    return scored;
 }
 
 // Lowest Y of the robot's corners (how close it is to the bottom wall), from its size and odometry
@@ -1570,7 +1970,8 @@ void skillsSweepToggleAndPark() {
     const double SKILLS_SWEEP_START_Y = contactY - SKILLS_SWEEP_RUN_IN * std::cos(h1);
 
     skillsAimAt(SKILLS_SWEEP_START_X, SKILLS_SWEEP_START_Y, true, SKILLS_EMPTY_TURN_SPEED);
-    skillsDriveToPoint(SKILLS_SWEEP_START_X, SKILLS_SWEEP_START_Y, true, SKILLS_DRIVE_SPEED, 0.0, 0, 0.0, 1500);
+    // rolls into the turn below instead of stopping first (the sweep start is 20" from goal B: room to swing)
+    skillsDriveToPoint(SKILLS_SWEEP_START_X, SKILLS_SWEEP_START_Y, true, SKILLS_DRIVE_SPEED, 0.0, SKILLS_ROLL_SPEED, 0.0, 1500);
 
     // Angle so the right corner leads, then drive in until it hits (toggle #1)
     chassis.turnToHeading(SKILLS_SWEEP_HEADING_1, 900,
@@ -1584,7 +1985,7 @@ void skillsSweepToggleAndPark() {
         while (pros::millis() - t0 < static_cast<uint32_t>(SKILLS_SWEEP_SWING_MS)) {
             double h = chassis.getPose().theta;
             double err = std::remainder(SKILLS_SWEEP_HEADING_2 - h, 360.0);
-            double gapLeft = skillsLowestCornerY() - (-FIELD_HALF + SKILLS_WALL_GAP);
+            double gapLeft = skillsLowestCornerY() - (-FIELD_HALF + SKILLS_SWEEP_SWING_WALL_GAP);
             if (err <= 2.0 || gapLeft <= 0) break;
             // same slow-down as the drive in, so the swinging corner stops at the gap instead of sliding into the wall
             chassis.tank(static_cast<int>(std::min(static_cast<double>(SKILLS_SWEEP_SWING_SPEED),
@@ -1603,7 +2004,7 @@ void skillsSweepToggleAndPark() {
 }
 
 // The full 1-minute skills routine
-//   motor toggle -> preload on goal A -> both field pins on goal A -> matchload on goal A -> pin-only on goal B
+//   motor toggle -> preload on goal A -> both field pins on goal A -> matchloads on goal A -> matchloads on goal B
 //   -> matchloads on goal B
 //   -> claw-side sweep toggle -> full speed back to park
 void skillsAuton() {
@@ -1614,41 +2015,82 @@ void skillsAuton() {
     const double goalAX = SKILLS_ROUTE.goalX;
     const double goalAY = SKILLS_ROUTE.goalY;
 
-    // 2. Both field pins onto goal A (spots 2, 3), then matchloads onto goal A (spot 4)
-    skillsFieldPins(SKILLS_ROUTE);
+    // 2. Both field pins onto goal A, then matchloads onto goal A. Each pin goes on the next free spot (onGoalA = how
+    //    many are on it), so a missed pickup (the pin check) never leaves a gap or puts one too high.
+    int onGoalA = 1;   // the preload
+    onGoalA += skillsFieldPins(SKILLS_ROUTE, onGoalA);
     bool outOfTime = false;
-    uint32_t lastCycleMs = 0;   // how long the last matchload cycle really took (0 = none yet)
+    uint32_t lastCycleMs = 0;   // how long the last full matchload cycle (one that scored) took (0 = none yet)
     {
-        int scored = 0, tries = 0;   // only a pin that was actually picked up moves on to the next stack spot
+        int scored = 0, tries = 0;   // a missed pickup doesn't count: it tries again (up to 2 extra tries)
         while (scored < SKILLS_A_LOADS && tries < SKILLS_A_LOADS + 2) {
             if (!skillsHaveTime(lastCycleMs ? lastCycleMs + SKILLS_CYCLE_MARGIN_MS : SKILLS_CYCLE_MS)) { outOfTime = true; break; }
             uint32_t cycleStart = pros::millis();
-            if (skillsMatchloadCycle(goalAX, goalAY, SKILLS_A_FIRST_LOAD_SPOT + scored, SKILLS_A_SCORE_EXTRA_DIST, false)) scored++;
-            lastCycleMs = pros::millis() - cycleStart;
+            if (skillsMatchloadCycle(goalAX, goalAY, onGoalA + 1, SKILLS_A_SCORE_EXTRA_DIST, false)) {
+                scored++;
+                onGoalA++;
+                lastCycleMs = pros::millis() - cycleStart;   // (a missed one is shorter: it would make the guard too hopeful)
+            }
             tries++;
         }
     }
 
-    // 3. Pin-only load onto goal B (spot 1), then matchloads onto goal B (spots 2, 3, 4)
-    if (!outOfTime && skillsHaveTime(SKILLS_PIN_ONLY_CYCLE_MS)) {
-        skillsPinOnlyCycle();
-        int scored = 0, tries = 0;
-        while (scored < SKILLS_B_LOADS && tries < SKILLS_B_LOADS + 2) {
-            if (!skillsHaveTime(lastCycleMs ? lastCycleMs + SKILLS_CYCLE_MARGIN_MS : SKILLS_CYCLE_MS)) break;
+    // How much slower than the simulator this robot is, from the goal A cycles it timed (scales the estimates below)
+    if (lastCycleMs > 0) skillsSlowerThanSim = std::max(1.0, static_cast<double>(lastCycleMs) / SKILLS_SIM_A_CYCLE_MS);
+
+    // 3. Goal B with whatever time is left: as many as the time guard says fit, missed pickups included (the guard
+    //    always plans a full cycle). Its first pin is lowered slowly like the preload (spot 1).
+    if (!outOfTime) {
+        int onGoalB = 0;
+        bool first = true;
+        lastCycleMs = 0;   // goal B cycles are different: SKILLS_PIN_ONLY_CYCLE_MS / SKILLS_B_CYCLE_MS until one is timed
+        while (onGoalB < SKILLS_B_MAX_PINS) {
+            uint32_t planned = lastCycleMs ? lastCycleMs + SKILLS_CYCLE_MARGIN_MS
+                                           : static_cast<uint32_t>((first ? SKILLS_PIN_ONLY_CYCLE_MS : SKILLS_B_CYCLE_MS)
+                                                                   * skillsSlowerThanSim);
+            if (!skillsHaveTime(planned)) break;
             uint32_t cycleStart = pros::millis();
-            if (skillsMatchloadCycle(SKILLS_GOAL_B_X, SKILLS_GOAL_B_Y, 2 + scored, SKILLS_B_SCORE_EXTRA_DIST, false)) scored++;
-            lastCycleMs = pros::millis() - cycleStart;
-            tries++;
+            const bool slow = onGoalB == 0;   // spot 1: like the preload
+            if (skillsMatchloadCycle(SKILLS_GOAL_B_X, SKILLS_GOAL_B_Y, onGoalB + 1,
+                                     slow ? SKILLS_B_PRELOAD_EXTRA_DIST : SKILLS_B_SCORE_EXTRA_DIST, false, slow)) {
+                onGoalB++;
+                if (!first) lastCycleMs = pros::millis() - cycleStart;   // (the first one starts from goal A: longer)
+            }
+            first = false;
         }
     }
 
-    // 4. Sweep toggle + park (backs a little farther off the last goal first so it has room to turn)
-    skillsBackStraight(SKILLS_END_BACKUP, 0);
-    localizeWithWalls();   // stopped: check the position before the sweep, so the toggle and park line up
+    // 4. Sweep toggle + park. First, if it's next to a goal (it just scored there, facing it), back straight off until
+    //    it has room to turn. If the last try was a missed pickup, it's standing on T, already clear: no backing (backing
+    //    from T used to drive it into goal B).
+    {
+        Pose p = chassis.getPose();
+        const double room = ROBOT_HALF_DIAG + GOAL_HALF + SKILLS_TURN_SPARE;   // center to goal center to turn in place
+        double d = std::min(std::hypot(goalAX - p.x, goalAY - p.y), std::hypot(SKILLS_GOAL_B_X - p.x, SKILLS_GOAL_B_Y - p.y));
+        if (d < room) skillsBackStraight(room - d + 0.5, 0);
+    }
+    fieldAwareReset(SKILLS_RESET_JUMP);   // stopped: check the position before the sweep, so the toggle and park line up
     skillsSweepToggleAndPark();
 }
 
 }  // namespace skills_file
+
+// The skills opening (toggle -> preload -> both field pins onto one goal) on any route, for the qual autons
+// (src/quals.cpp). Everything about the route, tuning included, comes from `route`.
+void runOpeningRoute(const OpeningRoute& route) {
+    using namespace skills_file;
+    const AutonRoute r = {
+        route.startX, route.startY, route.startHeading,
+        route.goalX, route.goalY,
+        0.0, route.preloadExtraDist,
+        route.pin1X, route.pin1Y, route.pin1Heading, route.pin1GrabTurn, route.pin1GrabExtra, 0.0, route.pin1ScoreExtra,
+        route.pin2X, route.pin2Y, route.pin2Heading, route.pin2GrabTurn, route.pin2GrabExtra, 0.0, route.pin2ScoreExtra
+    };
+    skillsStartAndPreload(r);
+    skillsFieldPins(r, 1, route.lastBackup, 0);
+    chassis.tank(0, 0, true);
+    claw.move_velocity(0);
+}
 
 // Called from autonomous() in main.cpp: runs the 1-minute skills routine.
 void manyPinAlliance() {

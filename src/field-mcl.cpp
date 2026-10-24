@@ -2,6 +2,7 @@
 #include "rw/hardware.h"    // hw::distance*, hw::timeMicros
 #include "rw/mcl.h"         // RW's particle filter: mclInit / mclPredict / mclCorrect / mclEstimate / mclNudge
 #include "rw/utils.h"       // distanceResetPosition, beamToWall, localToGlobal, degToRad
+#include <algorithm>   // std::swap
 #include <cmath>
 
 // =====================================================================
@@ -16,6 +17,7 @@
 //   3. a reading that would move the position more than distance_reset_max_jump is skipped (like the resets)
 // Turn it on with use_mcl in src/rw-config.cpp (src/rw-user.cpp starts this instead of RW's startMcl).
 
+
 // RW's MCL state (rw/motor-control.cpp; not in RW's headers)
 extern double odom_motion_x, odom_motion_y;   // raw odometry movement, never changed by resets or MCL
 extern bool mcl_recenter;                     // set by setPose() / distance resets: start the particles there
@@ -26,6 +28,11 @@ namespace {
 // Corner margin for MCL's readings: the loaders are in the obstacle list, so it doesn't need RW's 18"
 // (with 18", every reading at the loader was skipped and MCL couldn't help where it matters most)
 constexpr double MCL_CORNER_MARGIN = 6.0;
+// MCL only corrects while the robot is moving slowly. The distance sensors report about distance_sensor_delay_msec
+// late; when the robot is pushed by hand that doesn't matter, but at auton speed a delay that's off by 20-30 msec is
+// 1-2" (it was right outside auton and off in auton). Between corrections it keeps following odometry.
+constexpr double MCL_MAX_SPEED_IPS = 20.0;
+constexpr double MCL_MAX_TURN_DPS = 90.0;
 constexpr double BEAM_SPREAD = 0.21;   // tan(12 deg): how much wider the beam gets per inch it travels
 constexpr double BEAM_SPARE = 1.0;     // extra room around each element
 
@@ -152,8 +159,9 @@ void fieldMclThread() {
                 count++;
             }
 
-            // Only weigh after moving a little, and not while spinning fast (same as RW)
-            if (count > 0 && moved_since_correct > 0.25 && odom_turn_rate_dps < 200) {
+            // Only weigh after moving a little, and only while moving slowly (MCL_MAX_SPEED_IPS / MCL_MAX_TURN_DPS)
+            if (count > 0 && moved_since_correct > 0.25 && odom_speed_ips < MCL_MAX_SPEED_IPS
+                && odom_turn_rate_dps < MCL_MAX_TURN_DPS) {
                 mclCorrect(heading_then, readings, count, field_half_size, odom_speed_ips * 0.01, shift_x, shift_y);
                 moved_since_correct = 0;
             }
@@ -170,6 +178,70 @@ void fieldMclThread() {
 }
 
 }  // namespace
+
+// One-shot reset while stopped, like RW's localizeWithWalls(), but with the same checks as the field-aware MCL:
+// RW's wall checks with a 6" corner margin (RW's resets use 18", which skips every reading next to the loaders), nothing
+// on the field in the beam before the wall, and a reading that would move X or Y more than maxJump is skipped.
+// Each sensor uses the median of 3 fresh readings (it waits up to 120 msec for them; they update about every 33 msec),
+// so one noisy reading can't move it.
+// Returns how many sensors reset X or Y. Only does anything when use_distance_resets is on.
+int fieldAwareReset(double maxJump) {
+    if (!use_distance_resets) return 0;
+    const hw::DistanceSensor sensors[4] = {hw::front_distance, hw::right_distance, hw::back_distance, hw::left_distance};
+    const double sensor_x[4] = {front_sensor_offsetX, right_sensor_offsetX, back_sensor_offsetX, left_sensor_offsetX};
+    const double sensor_y[4] = {front_sensor_offsetY, right_sensor_offsetY, back_sensor_offsetY, left_sensor_offsetY};
+    const double sensor_angle[4] = {0, 90, 180, 270};
+
+    // Up to 3 fresh readings per sensor
+    double readings[4][3];
+    int counts[4] = {0, 0, 0, 0};
+    uint32_t stamps[4] = {0, 0, 0, 0};
+    for (int i = 0; i < 4; i++) stamps[i] = hw::distanceTimestamp(sensors[i]);
+    double start = hw::timeMsec();
+    while (hw::timeMsec() - start < 120) {
+        for (int i = 0; i < 4; i++) {
+            if (counts[i] >= 3 || !hw::distanceInstalled(sensors[i]) || !hw::distanceDetected(sensors[i])) continue;
+            uint32_t stamp = hw::distanceTimestamp(sensors[i]);
+            if (stamp == stamps[i]) continue;
+            stamps[i] = stamp;
+            readings[i][counts[i]++] = hw::distanceInches(sensors[i]) * distance_sensor_scale;
+        }
+        hw::sleepMsec(10);
+    }
+
+    double heading = getInertialHeading();
+    int resets = 0;
+    for (int i = 0; i < 4; i++) {
+        if (counts[i] == 0) continue;
+        double* r = readings[i];
+        if (counts[i] == 3) {   // median
+            if (r[0] > r[1]) std::swap(r[0], r[1]);
+            if (r[1] > r[2]) std::swap(r[1], r[2]);
+            if (r[0] > r[1]) std::swap(r[0], r[1]);
+        }
+        double reading_in = counts[i] == 3 ? r[1] : (counts[i] == 2 ? 0.5 * (r[0] + r[1]) : r[0]);
+        if (reading_in < 1.5 || reading_in > mcl_max_range) continue;
+
+        double new_pos = 0;
+        int axis = distanceResetPosition(x_pos, y_pos, heading, sensor_x[i], sensor_y[i], sensor_angle[i],
+                                         reading_in, field_half_size, distance_reset_max_angle, MCL_CORNER_MARGIN, new_pos);
+        if (axis == 0) continue;
+        double offset_x = 0, offset_y = 0;
+        localToGlobal(sensor_x[i], sensor_y[i], degToRad(heading), offset_x, offset_y);
+        double beam_rad = degToRad(heading + sensor_angle[i]);
+        double beam_x = std::sin(beam_rad), beam_y = std::cos(beam_rad);
+        bool hits_x_wall = false;
+        double other_gap = 0;
+        double wall_dist = beamToWall(x_pos + offset_x, y_pos + offset_y, beam_x, beam_y, field_half_size, hits_x_wall, other_gap);
+        if (beamBlocked(x_pos + offset_x, y_pos + offset_y, beam_x, beam_y, wall_dist)) continue;
+        double& coord = axis == 1 ? x_pos : y_pos;
+        if (std::fabs(new_pos - coord) > maxJump) continue;
+        coord = new_pos;
+        resets++;
+    }
+    if (resets > 0) mcl_recenter = true;   // MCL starts over from the fixed spot
+    return resets;
+}
 
 void startFieldMcl() {
     hw::startThread(fieldMclThread);
