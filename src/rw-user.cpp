@@ -53,11 +53,10 @@ void runPreAutonomous() {
   // Autonomous routines for the selector, in the order they appear on the Brain screen (up to 12).
   // The first one is picked by default; the choice is saved on the SD card if one is in.
   addAuton("Skills", manyPinAlliance);               // skillsauto.cpp: 1-minute skills run
-  addAuton("Qual 2-Pin R", twoPinAlliance);          // auton.cpp: preload + 2 pins, right wall
-  addAuton("Qual Mirror R", mirrorAllianceRight);    // autonmirror.cpp: 3-pin route, right wall
-  addAuton("Qual Mirror Top", mirrorAllianceTop);    // autonmirror.cpp: 3-pin route, top wall
-  addAuton("Tuning Test", exampleAuton);             // drive + turn PID
-  addAuton("Qual Right", qualRightAlliance);         // quals.cpp: Qual Left mirrored, from the right wall
+  addAuton("Red Left", qualRedLeft);       // back on the left wall
+  addAuton("Red Bottom", qualRedBottom);   // back on the bottom wall
+  addAuton("Blue Right", qualBlueRight);   // back on the right wall
+  addAuton("Blue Top", qualBlueTop);       // back on the top wall        // quals.cpp: Qual Left mirrored, from the right wall
   // (the selector holds 12: "Odom Test" (exampleAuton2) made room for "Qual Right"; run it with TIMED_RUN_TEST)
   addAuton("Odom Check", odomCheckAuton);            // push by hand, read X / Y / heading
   addAuton("Square Test", squareTestAuton);          // 24" square, should end at 0, 0, 0

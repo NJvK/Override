@@ -89,6 +89,10 @@ void mirrorAllianceTop();    // autonmirror.cpp: 3-pin route from the top wall
 void manyPinAlliance();      // skillsauto.cpp:  the 1-minute skills run
 void qualLeftAlliance();     // quals.cpp:       qual from the left wall: the skills opening (preload + both field pins)
 void qualRightAlliance();    // quals.cpp:       qual from the right wall: the left one mirrored (all angles swapped)
+void qualRedLeft();
+void qualRedBottom();
+void qualBlueRight();
+void qualBlueTop();
 
 // A qual route built from the skills opening: toggle -> preload -> both field pins onto one goal.
 // Every spot, heading and tuning value is in here, so each qual auton has its own (see src/quals.cpp).
