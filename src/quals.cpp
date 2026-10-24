@@ -32,7 +32,7 @@
 // PIN_GRAB_TURN:      degrees. + = turns that much more to the RIGHT (clockwise) before driving into the pin, - = left
 // PIN_GRAB_EXTRA:     inches. + = drives further into the pin, - = stops shorter
 // PIN_SCORE_EXTRA:    inches. + = the pin goes further onto the goal, - = shorter
-// LAST_BACKUP:        backs off the goal this far after pin 2 (0: auton ends there, claw open)
+// LAST_BACKUP:        not used any more: auton ends at the goal, pin 2 still in the claw and the lift on coast
 
 // =====================================================================
 //   RED LEFT - tuning (starts with the skills robot tuning: pin 1 -4", pin 2 -2", preload -2")

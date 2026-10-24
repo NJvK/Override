@@ -10,7 +10,7 @@ extern bool selector_running;   // RW's auton selector: false stops it (what run
 //   odomCheckAuton = "Odom Check", sensorCheckAuton = "Sensor Check", manyPinAlliance = "Skills",
 //   qualLeftAlliance = "Qual Left", qualRightAlliance = "Qual Right", feedforwardAuton = "Feedforward", ...
 // SET IT BACK TO nullptr BEFORE A MATCH, or Skills / the qual autons won't run.
-void (*const TIMED_RUN_TEST)() = manyPinAlliance;
+void (*const TIMED_RUN_TEST)() = nullptr;
 
 void runAutonomous() {
   if (TIMED_RUN_TEST != nullptr) {

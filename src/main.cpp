@@ -810,6 +810,12 @@ void autonomous() {
 
 // Driver control
 void opcontrol() {
+    // Lift PID back on, first thing. The qual autons end with the lift PID off and the lift on coast (so a pin that's
+    // almost on the goal keeps falling onto it after auton ends); this turns the PID back on and holds the lift
+    // wherever it ended up. Both lift motors on coast (the PID does the holding, same as before).
+    DR4B.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
+    holdDR4B();
+
     dr4bSlewDown = DR4B_SLEW_DOWN;   // back to the normal lowering speed for driver control
 
     // Stop any RW drive motion still running from auton (RW runs motions in their own task, which
@@ -821,11 +827,7 @@ void opcontrol() {
     }
     leftMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     rightMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
-    DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
     toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-
-    // Hold wherever the lift is when driver control starts
-    holdDR4B();
 
     // Match start: assume alliance goal, all counters at zero
     currentGoal = GOAL_ALLIANCE;

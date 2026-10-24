@@ -886,9 +886,12 @@ const AutonRoute TOP_ROUTE = {
 //      18 deg off), so from P in it is square to the loader. It used to stop at P and turn; now it never stops.
 constexpr double SKILLS_LOADER_Y = -58.7;                                         // loader center (RW field: +-58.7)
 // Sideways offset for the line it drives in on: + = stops more to the ROBOT'S RIGHT as it faces the loader (+Y here).
-// On the robot it stopped 1-2" too far right, so -1.5. The robot's side then runs 1.66" off the bottom wall.
-constexpr double SKILLS_LOADER_RIGHT_ADJUST = -1.5;
-constexpr double SKILLS_LOADER_LINE_Y = SKILLS_LOADER_Y + SKILLS_LOADER_RIGHT_ADJUST;   // -60.2: the line it drives in on
+// On the robot it stopped 1-2" too far right, so it was -1.5. That put the robot's side only 1.66" off the bottom wall,
+// and every trip in and out of the loader brought a corner 0.7-1" from the wall (simulator). -0.75: the corners stay
+// 1.5"+ off the wall, and it stops 0.75" further right than with -1.5. If the claw now misses the loader pin to the
+// right, go back toward -1.5 (and SKILLS_LOADER_EXIT_WALL_SPARE back toward 0.75).
+constexpr double SKILLS_LOADER_RIGHT_ADJUST = -0.75;
+constexpr double SKILLS_LOADER_LINE_Y = SKILLS_LOADER_Y + SKILLS_LOADER_RIGHT_ADJUST;   // -59.45: the line it drives in on
 constexpr double SKILLS_LOADER_FACE_X = -FIELD_HALF + 3.75;                       // -66.5: front face of the loader (sticks out 3.75" from the wall)
 constexpr double SKILLS_LOADER_GAP = 1.5;          // the FRONT of the robot stops this far from the loader face (was 1.0: in the simulator it
                                                    // came within 0.4" of the loader with 1.0). Raise it if
@@ -909,10 +912,11 @@ constexpr double SKILLS_LINEUP_STEER = 6.0;        // degrees of heading toward 
 constexpr double SKILLS_PRECISE_TOL = 0.6;          // turn spot T: it fixes any slide past it bigger than this (inches) before turning
 constexpr int SKILLS_PRECISE_SPEED = 35;
 constexpr double SKILLS_LOADER_EXIT_STRAIGHT = 2.5;  // leaving the loader: dead straight back this far before it starts climbing away
-// Leaving the loader it can let the corners get this close (with the loader line SKILLS_LOADER_RIGHT_ADJUST lower, its
-// side is only 1.66" off the wall there, so with SKILLS_LOADER_WALL_SPARE it could never start climbing back to T)
-constexpr double SKILLS_LOADER_EXIT_WALL_SPARE = 0.75;   // (was 1.0: with the -1.5 loader line it reached T up to 2" low, and
-                                                         // turning there clipped the bottom wall)
+// Leaving the loader it can let the corners get this close (square on the loader line its side is 2.41" off the wall,
+// so with SKILLS_LOADER_WALL_SPARE it could barely start climbing back to T)
+constexpr double SKILLS_LOADER_EXIT_WALL_SPARE = 1.5;    // (0.75 with the -1.5 loader line, where 1.0 reached T up to 2" low and
+                                                         // turning there clipped the bottom wall. With the -0.75 line there's
+                                                         // room for 1.5, and it still reaches T's height)
 // ...and eases off the climb over the last inches: at most this many degrees per inch still to climb. Climbing at up to 40
 // degrees right to the end, it overshot T's height by about 2" (in the simulator), so the turn at T came within 1.6" of
 // goal B and the next trip in started too high and reached the loader up to 1.4" off the loader line.
@@ -1131,6 +1135,52 @@ bool skillsRunning = false;   // true during the 1-minute skills run (skillsAuto
 // --- Qual autons only (runOpeningRoute, 15 s). Skills keeps its own values. ---
 constexpr int QUALS_PICKUP_MS = 600;          // fixed field-pin pickup (skills: SKILLS_PICKUP_MS 1200). The claw is already
                                               // spinning for the last 5" of the drive in, so the pin is in by then
+// Quicker scoring of the two field pins (everything from the turn toward the goal on; the drive to each pin, the pickup
+// and the lift kick after it stay the same). Moderate, so it doesn't tip:
+constexpr int QUALS_SCORE_TURN_SPEED = 127;      // turn toward the goal with the pin (skills: SKILLS_MATCHLOAD_TURN_SPEED 110)
+constexpr double QUALS_SCORE_ACCEL = 4.5;        // speed-up per 10 ms driving to the goal and backing off (skills: SKILLS_ACCEL 3.2)
+constexpr double QUALS_SCORE_DECEL = 7.0;        // slow-down per inch left (skills: SKILLS_DECEL 5)
+constexpr double QUALS_LOWER_SLEW = 700.0;       // degrees/second the lift lowers onto the goal (auton normally 560, driver 700)
+constexpr int QUALS_RELEASE_DELAY_MS = 250;      // pin 1: lowers onto the goal this long, then the claw opens (skills: 700)
+constexpr int QUALS_RELEASE_MS = 100;            // pin 1: then this long before backing off (skills: 250)
+constexpr double QUALS_PIN1_BACKUP = 12.5;       // backs off the goal after pin 1: just turning room for the trip to pin 2
+                                                 // (skills: SKILLS_PIN1_BACKUP 14)
+// Pin 2 (the last thing in quals): the claw does NOT open and nothing waits for the lift. The moment the claw is over
+// the goal, the lift goes limp (skillsCoastLift) with a small push down to get it moving, and falls onto the goal under
+// its own weight, still holding the pin. No drive back.
+// End of the qual autons: lift PID off and both lift motors on coast, so the lift falls by itself and keeps falling
+// after auton ends (a pin that's almost on still drops onto the goal). opcontrol() in main.cpp turns the lift PID back
+// on first thing (holding the lift wherever it ended up).
+// pushDown: at the same moment it goes on coast, QUALS_END_PUSH_MV down for QUALS_END_PUSH_MS (a lift sitting still on
+// coast can just stay there; the push gets it falling), then no power at all
+constexpr int QUALS_END_PUSH_MV = 3000;   // small: a quarter of full power (12000)
+constexpr int QUALS_END_PUSH_MS = 150;
+void skillsCoastLift(bool pushDown = false) {
+    autonLiftCoasting = false;
+    autonLiftGrounding = false;
+    dr4bSettling = false;
+    dr4bTargetForced = false;
+    dr4bManualMode = true;   // the lift PID task leaves the lift alone while this is true
+    DR4B.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);   // both motors (set_brake_mode only sets the first one)
+    if (pushDown) {
+        DR4B.move_voltage(-QUALS_END_PUSH_MV);
+        const uint32_t t0 = pros::millis();
+        while (pros::millis() - t0 < static_cast<uint32_t>(QUALS_END_PUSH_MS)) {
+            autonTick();
+            pros::delay(10);
+        }
+    }
+    DR4B.move_voltage(0);
+}
+// In quals the lift never goes above spot 3, so "tall" (SKILLS_TALL_LIFT_DEG) only came from the lift overshooting its
+// target a little, which put the drive to the goal with pin 2 on the slow tall-lift speeds. Quals only count the lift as
+// tall when it's also aimed above the line. Skills is unchanged.
+bool skillsLiftIsTall() {
+    if (getDR4BPosition() <= SKILLS_TALL_LIFT_DEG) return false;
+    return skillsRunning || dr4bTarget > SKILLS_TALL_LIFT_DEG;
+}
+double skillsAccelLow = SKILLS_ACCEL;   // speed-up / slow-down used with the lift low (quals scoring raises them)
+double skillsDecelLow = SKILLS_DECEL;
 // After pin 1 it backs this far off goal A before heading for pin 2 (room to turn: SKILLS_TURN_SPARE to goal A)
 constexpr double SKILLS_PIN1_BACKUP = 14.0;
 
@@ -1419,17 +1469,19 @@ double skillsBearing(double x, double y, bool forwards) {
 // Turns toward (x, y) only if it's more than SKILLS_AIM_SKIP_DEG off, and hands off to the drive
 // SKILLS_ROLL_TURN_EXIT_DEG early without settling (the drive steers out the rest while moving).
 // turnSpeed: top turning speed while the lift is low (it's always SKILLS_TALL_TURN_SPEED when the lift is tall)
-void skillsAimAt(double x, double y, bool forwards, int turnSpeed = SKILLS_TURN_SPEED) {
+// settleFirst = false: no settle / wall reset before a big turn (the quals' turn toward the goal right after a pickup,
+// which has just done the reset)
+void skillsAimAt(double x, double y, bool forwards, int turnSpeed = SKILLS_TURN_SPEED, bool settleFirst = true) {
     Pose p = chassis.getPose();
     double err = skillsWrap(skillsBearing(x, y, forwards) - p.theta);
     if (std::fabs(err) > SKILLS_AIM_SKIP_DEG) {
-        if (std::fabs(err) > SKILLS_SETTLE_TURN_DEG && skillsRollSpeed == 0.0) {
+        if (settleFirst && std::fabs(err) > SKILLS_SETTLE_TURN_DEG && skillsRollSpeed == 0.0) {
             skillsSettle();   // big turn in place: from a full stop, right where it should be
             fieldAwareReset(SKILLS_RESET_JUMP);
             p = chassis.getPose();
             err = skillsWrap(skillsBearing(x, y, forwards) - p.theta);
         }
-        int maxSpeed = getDR4BPosition() > SKILLS_TALL_LIFT_DEG ? SKILLS_TALL_TURN_SPEED : turnSpeed;
+        int maxSpeed = skillsLiftIsTall() ? SKILLS_TALL_TURN_SPEED : turnSpeed;
         chassis.turnToHeading(p.theta + err, 1200,
                               {.maxSpeed = maxSpeed,
                                .minSpeed = SKILLS_ROLL_TURN_MIN_SPEED,
@@ -1467,18 +1519,18 @@ void skillsDriveToPoint(double x, double y, bool forwards, int maxSpeed, double 
         double remaining = (x - p.x) * std::sin(moveDir) + (y - p.y) * std::cos(moveDir) - stopShort;
         if (remaining <= (endSpeed > 0 ? 1.0 : 0.3)) break;
 
-        bool tall = getDR4BPosition() > SKILLS_TALL_LIFT_DEG;
+        bool tall = skillsLiftIsTall();
         double prev = speed;
         // Speed limit from the lift height. The robot is never made to drop
         // below this limit faster than SKILLS_BRAKE_PER_TICK, so a lift going tall mid-drive can't slam it.
         double limit = tall ? std::min(static_cast<double>(maxSpeed), SKILLS_TALL_MAX_SPEED) : static_cast<double>(maxSpeed);
         // Distance slow-down at the end (already gentle by itself)
-        double stopCap = SKILLS_MIN_DRIVE_SPEED + (tall ? SKILLS_DECEL_TALL : SKILLS_DECEL) * remaining;
+        double stopCap = SKILLS_MIN_DRIVE_SPEED + (tall ? SKILLS_DECEL_TALL : skillsDecelLow) * remaining;
         if (endSpeed > 0) stopCap = std::max(stopCap, static_cast<double>(endSpeed));
 
         double maxDrop = tall ? SKILLS_BRAKE_PER_TICK_TALL : SKILLS_BRAKE_PER_TICK;
         limit = std::max(limit, prev - maxDrop);   // ease down to a new limit instead of slamming
-        speed = std::max(0.0, std::min({prev + (tall ? SKILLS_ACCEL_TALL : SKILLS_ACCEL), limit, stopCap}));
+        speed = std::max(0.0, std::min({prev + (tall ? SKILLS_ACCEL_TALL : skillsAccelLow), limit, stopCap}));
 
         double err = skillsWrap(aim - p.theta);   // + = needs to turn right
         double corr = std::clamp(SKILLS_STEER_KP * err, -SKILLS_STEER_MAX, SKILLS_STEER_MAX);
@@ -1625,9 +1677,20 @@ void skillsDropMissedPin(double goalX, double goalY) {
 
 // Returns true if it scored. Carrying a pin (not preload style), it stops as soon as the pin check says the claw is
 // empty, then skillsDropMissedPin and returns false (the stack spot stays free for the next pin).
+// Quals (not skills), carrying a field pin: the quicker scoring (QUALS_SCORE_ block). holdAtEnd (quals' pin 2): once
+// the claw is over the goal the lift goes limp right away (skillsCoastLift), claw closed, no waiting, no backing off.
 bool skillsScoreOnGoal(double goalX, double goalY, double height, double extraDist, bool preloadStyle,
                        double backupDist, int backupEndSpeed, int turnSpeed = SKILLS_MATCHLOAD_TURN_SPEED,
-                       int preloadLowerMs = SKILLS_PRELOAD_LOWER_MS) {
+                       int preloadLowerMs = SKILLS_PRELOAD_LOWER_MS, bool holdAtEnd = false) {
+    const bool quick = !skillsRunning && !preloadStyle;
+    struct QuickScoring {   // quicker drives while scoring in quals, back to normal however it returns
+        bool on;
+        explicit QuickScoring(bool q) : on(q) {
+            if (on) { skillsAccelLow = QUALS_SCORE_ACCEL; skillsDecelLow = QUALS_SCORE_DECEL; }
+        }
+        ~QuickScoring() { skillsAccelLow = SKILLS_ACCEL; skillsDecelLow = SKILLS_DECEL; }
+    } quickScoring(quick);
+    if (quick) turnSpeed = QUALS_SCORE_TURN_SPEED;
     autonGoalX = goalX;
     autonGoalY = goalY;
     skillsAbortOnLost = skillsPinWatch;   // only while it's carrying a picked-up pin (not the preload)
@@ -1640,7 +1703,7 @@ bool skillsScoreOnGoal(double goalX, double goalY, double height, double extraDi
     const double stopShort = AUTON_CLAW_REACH - extraDist;   // robot center stops here, claw over the goal
 
     autonSetLift(std::min(height, SKILLS_TURN_LIFT_MAX));
-    skillsAimAt(goalX, goalY, true, turnSpeed);
+    skillsAimAt(goalX, goalY, true, turnSpeed, !quick);
     if (lost()) return false;
     if (height > SKILLS_TURN_LIFT_MAX) {
         // Tall stack spot: full speed with the lift at SKILLS_TURN_LIFT_MAX until it's just far enough out that the
@@ -1658,6 +1721,33 @@ bool skillsScoreOnGoal(double goalX, double goalY, double height, double extraDi
     skillsDriveToPoint(goalX, goalY, true, SKILLS_DRIVE_SPEED, stopShort, 0, 0.0, 3000);
     if (lost()) return false;
     skillsAbortOnLost = false;
+
+    if (quick) {
+        const double normalSlewDown = dr4bSlewDown;
+        dr4bSlewDown = QUALS_LOWER_SLEW;
+        if (holdAtEnd) {
+            // Claw over the goal with the pin: no lowering wait, the lift goes on coast with a small push down and drops
+            // onto the goal (claw stays closed)
+            dr4bSlewDown = normalSlewDown;
+            skillsCoastLift(true);
+            return true;
+        }
+        autonLowerLiftCoast(AUTON_LOW_HEIGHT);
+        uint32_t t0 = pros::millis();
+        while (pros::millis() - t0 < static_cast<uint32_t>(QUALS_RELEASE_DELAY_MS)) {   // lowers onto the goal first
+            autonTick();
+            pros::delay(10);
+        }
+        autonOpenClaw();
+        t0 = pros::millis();
+        while (pros::millis() - t0 < static_cast<uint32_t>(QUALS_RELEASE_MS)) {
+            autonTick();
+            pros::delay(10);
+        }
+        dr4bSlewDown = normalSlewDown;
+        skillsBackStraight(backupDist, backupEndSpeed);
+        return true;
+    }
 
     uint32_t releaseMs = SKILLS_RELEASE_MS;
     if (preloadStyle) {
@@ -2104,12 +2194,14 @@ int skillsFieldPins(const AutonRoute& r, int onGoal, double lastBackup = SKILLS_
     if (skillsGrabFieldPin(r.pin1X, r.pin1Y, r.pin1Heading, SKILLS_PIN1_LINEUP, r.pin1GrabExtra, r.pin1GrabTurn)) {
         // Backs off far enough to turn toward pin 2 with room to spare
         if (skillsScoreOnGoal(r.goalX, r.goalY, skillsStackHeight(onGoal + 1), r.pin1ScoreExtra, false,
-                              SKILLS_PIN1_BACKUP, 0)) scored++;
+                              skillsRunning ? SKILLS_PIN1_BACKUP : QUALS_PIN1_BACKUP, 0)) scored++;
     }
 
     if (skillsGrabFieldPin(r.pin2X, r.pin2Y, r.pin2Heading, SKILLS_PIN2_LINEUP, r.pin2GrabExtra, r.pin2GrabTurn)) {
+        // quals: pin 2 is the last thing: the lift drops it onto the goal on coast, claw still closed (holdAtEnd)
         if (skillsScoreOnGoal(r.goalX, r.goalY, skillsStackHeight(onGoal + scored + 1), r.pin2ScoreExtra, false,
-                              lastBackup, lastEndSpeed)) scored++;
+                              lastBackup, lastEndSpeed, SKILLS_MATCHLOAD_TURN_SPEED, SKILLS_PRELOAD_LOWER_MS,
+                              !skillsRunning)) scored++;
     } else {
         // missed pin 2: it's standing at pin 2 facing the bottom-left, lift down. The trip to the loader turn spot drives
         // there forwards (a small turn, and the front, not the back, goes toward the bottom wall)
@@ -2335,7 +2427,10 @@ void runOpeningRoute(const OpeningRoute& route) {
     skillsStartAndPreload(r);
     skillsFieldPins(r, 1, route.lastBackup, 0);
     chassis.tank(0, 0, true);
-    claw.move_velocity(0);
+    // Lift on coast for the rest of auton, whatever happened (pin 2 scored, missed or dropped). Already done (with the
+    // push down) if pin 2 reached the goal; otherwise the lift is down already, so no push. The claw keeps holding pin 2
+    // until auton ends; it isn't opened or stopped.
+    skillsCoastLift();
 }
 
 // Called from autonomous() in main.cpp: runs the 1-minute skills routine.
