@@ -40,7 +40,7 @@ constexpr double PIN_LIFT_MIN_VOLTAGE = 4000.0;
 constexpr const char* PIN_LIFT_RUMBLE = "..";
 constexpr double CLAW_STALL_SPEED = 50.0;       // rpm: the claw counts as "slow / stalled" below this (while R1 is held) (was 30 - higher = detects sooner)
 constexpr double CLAW_HOLD_STALL_SPEED = 15.0;  // rpm: same, after R1 is released and the claw keeps squeezing at CLAW_HOLD_SPEED
-constexpr double CLAW_HOLD_SPEED = 80.0;        // rpm: driver control, claw keeps squeezing at this after R1 is released (was 60)
+constexpr double CLAW_HOLD_SPEED = 0.0;        // rpm: driver control, claw keeps squeezing at this after R1 is released (was 60)
 // Stall checks start once the claw reaches CLAW_SPINUP_SPEED, or after CLAW_STALL_GRACE_MS at the latest
 constexpr double CLAW_SPINUP_SPEED = 80.0;      // rpm: the claw counts as "got moving" above this
 constexpr int CLAW_STALL_GRACE_MS = 120;        // ms: start checking anyway after this (element already in the claw)

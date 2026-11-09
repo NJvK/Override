@@ -42,15 +42,33 @@ constexpr float DRIVE_CURVE_GAIN = 1.019;
 constexpr int CONTROLLER_READOUT = 3;
 
 // DR4B motor
-pros::MotorGroup DR4B({-7, 2}, pros::MotorGearset::green);
+pros::MotorGroup DR4B({2}, pros::MotorGearset::green);   // one lift motor now
 
 // DR4B rotation sensor
-constexpr int DR4B_ROTATION_PORT = 3;
+constexpr int DR4B_ROTATION_PORT = 4;
 pros::Rotation dr4bRotation(DR4B_ROTATION_PORT);
 
 // Other mechanisms
-pros::Motor claw(9);
-pros::Motor toggleMechanism(-4);
+pros::Motor claw(-9);
+pros::Motor toggleMechanism(-21);   // moved off port 3 (the flipper has it). Nothing is plugged into 21, so it does nothing
+pros::Motor intake(-7);                     // intake, on the old second lift motor port
+constexpr int INTAKE_VOLTAGE = 12000;      // intake power when on (12000 = full)
+// Pin flipper. Off when driver control starts. Each Y press flips direction: forward, reverse, forward, ...
+// It turns itself off when it can't move any more (hits its stop or a pin): see the stall stop below.
+constexpr int FLIPPER_PORT = 3;
+pros::Motor flipper(-FLIPPER_PORT);         // reversed; use FLIPPER_PORT (no minus) to flip it back
+constexpr int FLIPPER_RPM = 50;            // flipper speed forward (rpm)
+constexpr int FLIPPER_REVERSE_RPM = 50;     // flipper speed in reverse (rpm)
+// Flipper stall stop, by position: if the motor turns less than FLIPPER_STALL_DEG in FLIPPER_STALL_MS it can't
+// move any more, so it turns off. FLIPPER_STALL_GRACE_MS after each press it isn't checked (time to get moving).
+// At 50 rpm it turns about 45 degrees in 150 ms, so 5 degrees only happens when it's really blocked.
+constexpr double FLIPPER_STALL_DEG = 5.0;    // motor degrees
+constexpr int FLIPPER_STALL_MS = 150;
+constexpr int FLIPPER_STALL_GRACE_MS = 200;
+// Claw squeeze after R1 is let go (driver control), in millivolts (12000 = full power).
+// Voltage, not speed: once the claw stalls on a pin it only pushes this hard. On a speed
+// command, a stalled motor goes to full power trying to reach its speed.
+constexpr int CLAW_HOLD_VOLTAGE = 2000;
 
 // =====================================================================
 //                     AUTO STACK TUNING (all in one place)
@@ -107,7 +125,8 @@ constexpr double NEUTRAL_HEIGHTS[NUM_STACK_HEIGHTS] = {
 };
 
 // --- Auto height behavior ---
-// Auto height feature starts ON (true) or OFF (false) when driver control starts
+// Auto height feature starts ON (true) or OFF (false) when driver control starts.
+// B no longer turns it on and off (B is the intake reverse now), so this setting decides it for the whole match.
 constexpr bool AUTO_HEIGHT_ON_AT_START = false;
 // A lift press counts as "still going up" until the lift is within this many
 // degrees of its target. If a new goal is detected while still going up, that
@@ -208,7 +227,7 @@ constexpr int TIP_STALL_MS = 150;                // must stay stopped this long 
 
 // --- Controller vibration patterns ("." = short, "-" = long) ---
 constexpr const char* GOAL_CHANGE_RUMBLE = ".";   // goal change detected
-constexpr const char* AUTO_TOGGLE_RUMBLE = "-";   // B pressed (auto on/off)
+constexpr const char* AUTO_TOGGLE_RUMBLE = "-";   // (not used now: B used to turn auto height on / off)
 // =====================================================================
 
 // Optical sensor
@@ -300,7 +319,7 @@ constexpr double DR4B_HOLD_TOLERANCE = 0.75;
 
 // Manual DR4B speeds
 constexpr double DR4B_UP_SPEED = 200.0;
-constexpr double DR4B_DOWN_SPEED = -100.0;
+constexpr double DR4B_DOWN_SPEED = -200.0;
 
 // Get rotation sensor position in degrees
 double getDR4BPosition() {
@@ -724,6 +743,7 @@ void initialize() {
     dr4bRotation.set_data_rate(5);
 #endif
 
+    dr4bRotation.set_reversed(true);   // sensor reads backwards: up must count up
     // DR4B should start fully down
     DR4B.tare_position();
     dr4bRotation.reset_position();
@@ -794,7 +814,7 @@ void initialize() {
             pros::delay(100);
         }
     });
-}   
+}
 
 // Field control connected, waiting for auton to start: keep the toggle mechanism on hold
 void competition_initialize() {
@@ -840,6 +860,9 @@ void opcontrol() {
     leftMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     rightMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
+    // Flipper on coast, so when it's off it isn't held (holding against its stop overheats it).
+    // This has to come AFTER the toggle line above: both are port 3, and the last brake mode set wins.
+    flipper.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
     // Match start: assume alliance goal, all counters at zero
     currentGoal = GOAL_ALLIANCE;
@@ -852,7 +875,14 @@ void opcontrol() {
 
     // Claw keeps spinning forward after R1 until R2 is used
     bool clawHolding = false;
-
+    // Intake: X = forward on / off, B = reverse on / off (starts off). 1 = forward, -1 = reverse, 0 = off
+    int intakeDirection = 0;
+    // Pin flipper: off at the start; Y flips it forward / reverse. 1 = forward, -1 = reverse, 0 = never pressed yet
+    int flipperState = 0;
+    bool flipperStalled = false;      // true once it couldn't move and turned itself off
+    uint32_t flipperStartMs = 0;      // when Y was last pressed
+    double flipperCheckPos = 0.0;     // motor position at the last stall check point
+    uint32_t flipperCheckMs = 0;      // time of the last stall check point
     // Pin pickup state
     uint32_t r1PressStartMs = 0;
     uint32_t clawSlowStartMs = 0;
@@ -887,22 +917,8 @@ void opcontrol() {
 
         driverArcadeDrive(leftY, 0.9 * rightX);   // same feel as LemLib's chassis.arcade()
 
-        // B toggles the auto height feature.
-        // Turning it back ON resets all counters, so the next L1 press goes to
-        // height 1 of the last remembered goal (alliance if none yet).
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
-            autoHeightEnabled = !autoHeightEnabled;
-
-            if (autoHeightEnabled) {
-                stackCount[GOAL_ALLIANCE] = 0;
-                stackCount[GOAL_NEUTRAL] = 0;
-                autoLiftInProgress = false;
-                goalCandidate = -1;
-                goalCandidateSeen = 0;
-            }
-
-            controller.rumble(AUTO_TOGGLE_RUMBLE);
-        }
+        // (B used to turn auto height on / off here. B is the intake reverse now, further down;
+        //  auto height stays at AUTO_HEIGHT_ON_AT_START for the whole match.)
 
         // Constantly watch the optical sensor for a goal change
         updateGoalDetection();
@@ -1129,7 +1145,7 @@ void opcontrol() {
         } else {
 
             if (clawHolding) {
-                claw.move_velocity(CLAW_HOLD_SPEED);
+                claw.move_voltage(CLAW_HOLD_VOLTAGE);
             } else {
                 claw.move_velocity(0);
             }
@@ -1137,7 +1153,7 @@ void opcontrol() {
         // Pin pickup: R1 is held (claw driving forward) but the claw has slowed to a stall, so it has a pin.
         // If the lift is low, move it to PIN_LIFT_HEIGHT. This runs once per R1 press.
         // It watches the claw both while R1 is held AND after R1 is released (the claw keeps squeezing at
-        // CLAW_HOLD_SPEED), so a quick tap of R1 still counts. Pressing R1 again or using R2 re-arms it.
+        // CLAW_HOLD_VOLTAGE), so a quick tap of R1 still counts. Pressing R1 again or using R2 re-arms it.
         {
             bool r1Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1);
             bool r2Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_R2);
@@ -1207,6 +1223,45 @@ void opcontrol() {
             toggleMechanism.move_velocity(200); // Spins one way while holding A (change speed if needed)
         } else {
             toggleMechanism.move_velocity(0);   // Stops when A is released
+        }
+
+        // Intake: X = forward on / off, B = reverse on / off. Pressing the other button switches straight over.
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
+            intakeDirection = (intakeDirection == 1) ? 0 : 1;
+        }
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
+            intakeDirection = (intakeDirection == -1) ? 0 : -1;
+        }
+        intake.move_voltage(intakeDirection * INTAKE_VOLTAGE);
+
+        // Pin flipper: each Y press flips direction (first press = forward). It turns itself off when it can't move.
+        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
+            flipperState = (flipperState == 1) ? -1 : 1;
+            flipperStalled = false;
+            flipperStartMs = pros::millis();
+            flipperCheckMs = flipperStartMs;
+            flipperCheckPos = flipper.get_position();
+        }
+
+        // Stall check: has it turned at least FLIPPER_STALL_DEG in the last FLIPPER_STALL_MS?
+        if (flipperState != 0 && !flipperStalled) {
+            uint32_t now = pros::millis();
+            double pos = flipper.get_position();
+            if (std::fabs(pos - flipperCheckPos) >= FLIPPER_STALL_DEG || now - flipperStartMs < FLIPPER_STALL_GRACE_MS) {
+                // still moving (or just started): new check point
+                flipperCheckPos = pos;
+                flipperCheckMs = now;
+            } else if (now - flipperCheckMs >= FLIPPER_STALL_MS) {
+                flipperStalled = true;   // can't move any more: off
+            }
+        }
+
+        if (flipperStalled || flipperState == 0) {
+            flipper.move_voltage(0);   // off = no power at all (coast), not held
+        } else if (flipperState == 1) {
+            flipper.move_velocity(FLIPPER_RPM);
+        } else {
+            flipper.move_velocity(-FLIPPER_REVERSE_RPM);
         }
         // -----------------------------------------------
         pros::delay(20);
