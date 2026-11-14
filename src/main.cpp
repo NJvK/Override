@@ -35,8 +35,7 @@ constexpr float DRIVE_CURVE_GAIN = 1.019;
 // The brain screen belongs to RW's auton selector now (it shows X / Y / heading and MCL there),
 // so the old brain screen readouts are on the CONTROLLER screen, lines 2 and 3 (line 1 = selected auton),
 // during driver control (disabled = the selector uses the controller, auton = the tuning tests use it).
-//   0 = lift + goal:  "L<lift> H<hold> C<claw rpm>"  /  "ALLY A<count> N<count> <seen> AUTO|MAN"
-//   1 = optical tuning: "Hue <hue> Prox <prox>"     /  "See <A/N/-> Cf <confirm count>"
+//   0 = lift:         "L<lift> H<hold> C<claw rpm>"
 //   2 = counters:      "Pin <pin lifts> Zero <zeroes>" / "Roll <IMU roll>"
 //   3 = distance sensors, inches (-- = sees nothing): "F<front> R<right>" / "B<back> L<left>"
 constexpr int CONTROLLER_READOUT = 3;
@@ -50,64 +49,41 @@ pros::Rotation dr4bRotation(DR4B_ROTATION_PORT);
 
 // Other mechanisms
 pros::Motor claw(-9);
-pros::Motor toggleMechanism(-21);   // moved off port 3 (the flipper has it). Nothing is plugged into 21, so it does nothing
+// Toggle mechanism: not on the robot any more. Its driver code is gone; this one line stays only because the
+// autons (skillsauto.cpp) still use the name. Port 0 = dummy port (no real device), so it never touches a real port.
+pros::Motor toggleMechanism(0);
 pros::Motor intake(-7);                     // intake, on the old second lift motor port
 constexpr int INTAKE_VOLTAGE = 12000;      // intake power when on (12000 = full)
-// Pin flipper. Off when driver control starts. Each Y press flips direction: forward, reverse, forward, ...
-// It turns itself off when it can't move any more (hits its stop or a pin): see the stall stop below.
+// Pin flipper. Starts the match down in the intake position, off.
+//   Hold A:    flips forward and keeps pushing there for as long as A is held (even against its stop).
+//   Release A: goes back down to the intake position, then turns off once it has been stuck on its stop
+//              for FLIPPER_RETURN_STALL_MS (it can't move any more = it's home).
+// move_velocity() uses as much power as it needs (up to full) to keep its speed, so it pushes through
+// instead of getting stuck.
 constexpr int FLIPPER_PORT = 3;
 pros::Motor flipper(-FLIPPER_PORT);         // reversed; use FLIPPER_PORT (no minus) to flip it back
-constexpr int FLIPPER_RPM = 50;            // flipper speed forward (rpm)
-constexpr int FLIPPER_REVERSE_RPM = 50;     // flipper speed in reverse (rpm)
-// Flipper stall stop, by position: if the motor turns less than FLIPPER_STALL_DEG in FLIPPER_STALL_MS it can't
-// move any more, so it turns off. FLIPPER_STALL_GRACE_MS after each press it isn't checked (time to get moving).
-// At 50 rpm it turns about 45 degrees in 150 ms, so 5 degrees only happens when it's really blocked.
-constexpr double FLIPPER_STALL_DEG = 5.0;    // motor degrees
-constexpr int FLIPPER_STALL_MS = 150;
-constexpr int FLIPPER_STALL_GRACE_MS = 200;
+constexpr int FLIPPER_RPM = 75;             // flipper speed going up / flipping (rpm)
+constexpr int FLIPPER_DOWN_RPM = 75;        // flipper speed going back down to the intake position (rpm)
+// Manual override (if it jams): hold DOWN arrow = force it down, hold UP arrow = force it up, at this speed.
+// Let go and it stops (off); A works normally again after.
+constexpr int FLIPPER_OVERRIDE_RPM = 200;   // full speed for the half motor
+// "Stuck" = the motor turned less than FLIPPER_STALL_DEG since the last time it moved
+constexpr double FLIPPER_STALL_DEG = 5.0;   // motor degrees
+constexpr int FLIPPER_RETURN_STALL_MS = 500;   // stuck this long on the way back = home: turn off
 // Claw squeeze after R1 is let go (driver control), in millivolts (12000 = full power).
 // Voltage, not speed: once the claw stalls on a pin it only pushes this hard. On a speed
 // command, a stalled motor goes to full power trying to reach its speed.
 constexpr int CLAW_HOLD_VOLTAGE = 2000;
 
 // =====================================================================
-//                     AUTO STACK TUNING (all in one place)
+//                     SCORING HEIGHTS (the autons use these)
 // =====================================================================
-// All heights are in DEGREES of the DR4B rotation sensor, the same number
-// shown on the brain screen as "Lift:". To find a height: lift manually to
-// the right spot on the field and read the Lift value.
+// All heights are in DEGREES of the DR4B rotation sensor. To find a height: lift manually to
+// the right spot on the field and read the lift value (CONTROLLER_READOUT 0, "L").
 // NOTE: every height should be above DR4B_BOTTOM_DEADZONE (the PID is off
 // below it). Values at or under it get bumped up to DR4B_BOTTOM_DEADZONE + 1.
 
-// --- Optical sensor (the sensor at the bottom of the robot facing the goal) ---
-constexpr int OPTICAL_PORT = 5;               // CHANGE to the real port
-constexpr int OPTICAL_LED_BRIGHTNESS = 100;   // 0-100
-
-// --- Alliance color: true = we are red, false = we are blue ---
-constexpr bool ALLIANCE_IS_RED = true;
-
-// --- Goal hue ranges (hue is 0-359) ---
-// If MIN is bigger than MAX the range wraps past 0 (needed for red).
-// The brain screen prints the live hue and proximity so you can tune these.
-constexpr double RED_HUE_MIN = 300.01;
-constexpr double RED_HUE_MAX = 360.0;
-constexpr double BLUE_HUE_MIN = 220.0;
-constexpr double BLUE_HUE_MAX = 239.0;
-constexpr double NEUTRAL_HUE_MIN = 240000.0;      // PLACEHOLDER - tune for the dark neutral goal
-constexpr double NEUTRAL_HUE_MAX = 3000000.0;     // PLACEHOLDER - tune for the dark neutral goal
-
-// --- Goal detection ---
-// Optical proximity is 0-255, HIGHER = CLOSER. The goal only counts as seen
-// when proximity is at or above this value.
-constexpr int GOAL_PROXIMITY_THRESHOLD = 100;
-// The new goal must be seen this many loops in a row (1 loop = 20 ms)
-// before it switches. Raise it if it flickers between goals.
-constexpr int GOAL_CONFIRM_CYCLES = 5;
-// A brief dropout (reading nothing for a moment, which happens when a hue sits near the edge of its
-// range) does NOT reset that count. It only resets after this many missed loops in a row.
-constexpr int GOAL_MISS_TOLERANCE = 4;
-
-// --- Height lists (degrees), one value per stack position 1-5 ---
+// --- Alliance goal heights (degrees), one per stack position 1-5 (getStackHeight() in the autons) ---
 constexpr int NUM_STACK_HEIGHTS = 5;
 constexpr double ALLIANCE_HEIGHTS[NUM_STACK_HEIGHTS] = {
     167.95,   // pin/cup 1
@@ -116,23 +92,6 @@ constexpr double ALLIANCE_HEIGHTS[NUM_STACK_HEIGHTS] = {
     490.69,   // pin/cup 4
     642.66    // pin/cup 5
 };
-constexpr double NEUTRAL_HEIGHTS[NUM_STACK_HEIGHTS] = {
-    50.0,   // pin/cup 1   PLACEHOLDER
-    85.0,   // pin/cup 2   PLACEHOLDER
-    120.0,  // pin/cup 3   PLACEHOLDER
-    155.0,  // pin/cup 4   PLACEHOLDER
-    190.0   // pin/cup 5   PLACEHOLDER
-};
-
-// --- Auto height behavior ---
-// Auto height feature starts ON (true) or OFF (false) when driver control starts.
-// B no longer turns it on and off (B is the intake reverse now), so this setting decides it for the whole match.
-constexpr bool AUTO_HEIGHT_ON_AT_START = false;
-// A lift press counts as "still going up" until the lift is within this many
-// degrees of its target. If a new goal is detected while still going up, that
-// press is treated as a misfire and the old goal's counter is rolled back.
-constexpr double AUTO_ARRIVE_TOLERANCE = 3.0;
-
 // --- Lift motion (how the PID travels to a height) ---
 // Voltage cap (mV, 12000 = full power) while the lift is travelling to a new height.
 // Holding a height still uses DR4B_MAX_HOLD_VOLTAGE further down.
@@ -225,24 +184,7 @@ constexpr int TIP_STALL_GRACE_MS = 150;          // wait this long after the slo
 constexpr int TIP_STALL_MS = 150;                // must stay stopped this long before the motors switch off
 // =====================================================================
 
-// --- Controller vibration patterns ("." = short, "-" = long) ---
-constexpr const char* GOAL_CHANGE_RUMBLE = ".";   // goal change detected
-constexpr const char* AUTO_TOGGLE_RUMBLE = "-";   // (not used now: B used to turn auto height on / off)
-// =====================================================================
-
-// Optical sensor
-pros::Optical optical(OPTICAL_PORT);
-
-// Auto stack state
-bool autoHeightEnabled = AUTO_HEIGHT_ON_AT_START;
-GoalType currentGoal = GOAL_ALLIANCE;          // goal list currently in use
-int stackCount[2] = {0, 0};                    // how many presses we've used on each goal (0-5)
-bool autoLiftInProgress = false;               // true while the lift is still going to an auto target
-GoalType lastPressGoal = GOAL_ALLIANCE;        // goal used by the most recent auto press
-int lastPressPrevCount = 0;                    // that goal's counter before the most recent press
-int goalCandidate = -1;                        // goal being confirmed by the sensor
-int goalCandidateSeen = 0;                     // loops the candidate has been seen
-int goalCandidateMisses = 0;                   // loops in a row the candidate has been missed
+// Counters shown on the controller (CONTROLLER_READOUT 2)
 int pinLiftCount = 0;                          // times the pin pickup moved the lift (shown on the brain screen)
 int liftZeroCount = 0;                         // times the lift was zeroed by a stall (shown on the brain screen)
 
@@ -597,46 +539,11 @@ void runDR4BPID() {
     }
 }
 
-// ---------------------------------------------------------------------
-// Auto stack helpers
-// ---------------------------------------------------------------------
-
-// True if hue is inside [lo, hi]. If lo > hi the range wraps past 0 (red).
-bool hueInRange(double hue, double lo, double hi) {
-    if (lo <= hi) {
-        return hue >= lo && hue <= hi;
-    }
-    return hue >= lo || hue <= hi;
-}
-
-// Returns the goal the optical sensor currently sees, or -1 if nothing
-// close enough (or a color we don't care about, like the opposing alliance goal)
-int detectGoal() {
-    if (optical.get_proximity() < GOAL_PROXIMITY_THRESHOLD) {
-        return -1;
-    }
-
-    double hue = optical.get_hue();
-
-    bool isAllianceColor = ALLIANCE_IS_RED
-        ? hueInRange(hue, RED_HUE_MIN, RED_HUE_MAX)
-        : hueInRange(hue, BLUE_HUE_MIN, BLUE_HUE_MAX);
-
-    if (isAllianceColor) {
-        return GOAL_ALLIANCE;
-    }
-
-    if (hueInRange(hue, NEUTRAL_HUE_MIN, NEUTRAL_HUE_MAX)) {
-        return GOAL_NEUTRAL;
-    }
-
-    return -1;
-}
-
-// Height (degrees) for a goal and stack position (count is 1-5)
+// Lift height (degrees) for stack position count (1-5) on the alliance goal. The autons use this.
+// (GoalType is kept for the autons' calls; there's only the alliance height list now.)
 double getStackHeight(GoalType goal, int count) {
-    const double* list = (goal == GOAL_ALLIANCE) ? ALLIANCE_HEIGHTS : NEUTRAL_HEIGHTS;
-    double height = list[count - 1];
+    (void)goal;
+    double height = ALLIANCE_HEIGHTS[count - 1];
 
     // PID is off in the bottom deadzone, so keep targets above it
     if (height <= DR4B_BOTTOM_DEADZONE) {
@@ -646,96 +553,11 @@ double getStackHeight(GoalType goal, int count) {
     return height;
 }
 
-// Called every loop: switches the active goal when the sensor confirms a different one.
-// Runs even with auto height off so the last goal is always remembered.
-void updateGoalDetection() {
-    int detected = detectGoal();
-
-    // Seeing the goal we're already on: nothing to switch to
-    if (detected == static_cast<int>(currentGoal)) {
-        goalCandidate = -1;
-        goalCandidateSeen = 0;
-        goalCandidateMisses = 0;
-        return;
-    }
-
-    // Nothing recognised this loop: forgive a short dropout, give up after several in a row
-    if (detected < 0) {
-        if (goalCandidate >= 0) {
-            goalCandidateMisses++;
-            if (goalCandidateMisses > GOAL_MISS_TOLERANCE) {
-                goalCandidate = -1;
-                goalCandidateSeen = 0;
-                goalCandidateMisses = 0;
-            }
-        }
-        return;
-    }
-
-    if (detected == goalCandidate) {
-        goalCandidateSeen++;
-        goalCandidateMisses = 0;
-    } else {
-        goalCandidate = detected;
-        goalCandidateSeen = 1;
-        goalCandidateMisses = 0;
-    }
-
-    if (goalCandidateSeen < GOAL_CONFIRM_CYCLES) {
-        return;
-    }
-
-    // Goal change confirmed
-    GoalType oldGoal = currentGoal;
-    currentGoal = static_cast<GoalType>(detected);
-    goalCandidate = -1;
-    goalCandidateSeen = 0;
-    goalCandidateMisses = 0;
-
-    if (autoHeightEnabled) {
-        // If the lift was still going up for the old goal, that press was a misfire
-        // (we were at a different goal), so give the old goal its count back.
-        if (autoLiftInProgress
-            && lastPressGoal == oldGoal
-            && std::fabs(dr4bTarget - getDR4BPosition()) > AUTO_ARRIVE_TOLERANCE) {
-            stackCount[oldGoal] = lastPressPrevCount;
-        }
-
-        autoLiftInProgress = false;
-        controller.rumble(GOAL_CHANGE_RUMBLE);
-    }
-}
-
-// L1 press in auto mode: advance this goal's counter and send the lift to that height.
-// After pin/cup 5 the next press wraps back to pin/cup 1 of the same goal.
-void autoLiftPress() {
-    GoalType goal = currentGoal;
-
-    lastPressGoal = goal;
-    lastPressPrevCount = stackCount[goal];
-
-    stackCount[goal]++;
-    if (stackCount[goal] > NUM_STACK_HEIGHTS) {
-        stackCount[goal] = 1;
-    }
-
-    dr4bTarget = getStackHeight(goal, stackCount[goal]);
-    dr4bTargetForced = false;
-    dr4bManualMode = false;
-    dr4bSettling = false;
-    DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
-
-    autoLiftInProgress = true;
-}
-
 // Initialize
 void initialize() {
     // RW: calibrates the IMU (keep the robot still ~2 s), starts odometry (+ MCL if it's on in
     // src/rw-config.cpp) and shows the auton selector on the brain screen. Replaces chassis.calibrate().
     runPreAutonomous();
-
-    // Optical sensor LED
-    optical.set_led_pwm(OPTICAL_LED_BRIGHTNESS);
 
     // Make the lift rotation sensor update every 5 ms (default is 20 ms) so the PID
     // gets fresh readings every loop and its damping (D term) isn't fed jumpy data
@@ -752,7 +574,6 @@ void initialize() {
 
     // PID controls holding instead of motor hold
     DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
-    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
 
 
     // Start DR4B PID
@@ -771,15 +592,7 @@ void initialize() {
                 pros::delay(100);
                 continue;
             }
-            if (CONTROLLER_READOUT == 1) {
-                if (!secondLine) {
-                    controller.print(1, 0, "Hue %-4.0f Prox %-4d   ", optical.get_hue(), static_cast<int>(optical.get_proximity()));
-                } else {
-                    int seen = detectGoal();
-                    controller.print(2, 0, "See %c  Cf %-3d       ",
-                                     seen == GOAL_ALLIANCE ? 'A' : (seen == GOAL_NEUTRAL ? 'N' : '-'), goalCandidateSeen);
-                }
-            } else if (CONTROLLER_READOUT == 3) {
+            if (CONTROLLER_READOUT == 3) {
                 // Raw readings times distance_sensor_scale, same numbers as the "Sensor Check" auton
                 auto inches = [](pros::Distance& sensor) {
                     int32_t mm = sensor.get();
@@ -799,16 +612,7 @@ void initialize() {
                     controller.print(2, 0, "Roll %-6.1f         ", imu.get_roll());
                 }
             } else {
-                if (!secondLine) {
-                    controller.print(1, 0, "L%-4.0f H%-4.0f C%-4.0f", getDR4BPosition(), dr4bTarget, claw.get_actual_velocity());
-                } else {
-                    int seen = detectGoal();
-                    controller.print(2, 0, "%s A%d N%d %c %s   ",
-                                     currentGoal == GOAL_ALLIANCE ? "ALLY" : "NEUT",
-                                     stackCount[GOAL_ALLIANCE], stackCount[GOAL_NEUTRAL],
-                                     seen == GOAL_ALLIANCE ? 'A' : (seen == GOAL_NEUTRAL ? 'N' : '-'),
-                                     autoHeightEnabled ? "AUTO" : "MAN");
-                }
+                controller.print(1, 0, "L%-4.0f H%-4.0f C%-4.0f", getDR4BPosition(), dr4bTarget, claw.get_actual_velocity());
             }
             secondLine = !secondLine;
             pros::delay(100);
@@ -816,22 +620,14 @@ void initialize() {
     });
 }
 
-// Field control connected, waiting for auton to start: keep the toggle mechanism on hold
-void competition_initialize() {
-    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    toggleMechanism.brake();
-}
+// Field control connected, waiting for auton to start (nothing to do)
+void competition_initialize() {}
 
-// Disabled (before auton, and between auton and driver): keep the toggle mechanism on hold
-void disabled() {
-    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    toggleMechanism.brake();
-}
+// Disabled (before auton, and between auton and driver): nothing to do
+void disabled() {}
 
 // Autonomous selector (only runs when field control / a competition switch starts autonomous)
 void autonomous() {
-    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-
     dr4bSlewDown = DR4B_AUTON_SLEW_DOWN;   // lift lowers a little slower in auton
 
     // Runs the auton picked on the brain screen (tap it, or the controller arrows while disabled):
@@ -859,30 +655,20 @@ void opcontrol() {
     }
     leftMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     rightMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
-    toggleMechanism.set_brake_mode(pros::E_MOTOR_BRAKE_HOLD);
-    // Flipper on coast, so when it's off it isn't held (holding against its stop overheats it).
-    // This has to come AFTER the toggle line above: both are port 3, and the last brake mode set wins.
+    // Flipper on coast, so when it's off it isn't held (holding against its stop overheats it)
     flipper.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
-
-    // Match start: assume alliance goal, all counters at zero
-    currentGoal = GOAL_ALLIANCE;
-    stackCount[GOAL_ALLIANCE] = 0;
-    stackCount[GOAL_NEUTRAL] = 0;
-    autoLiftInProgress = false;
-    goalCandidate = -1;
-    goalCandidateSeen = 0;
-    autoHeightEnabled = AUTO_HEIGHT_ON_AT_START;
 
     // Claw keeps spinning forward after R1 until R2 is used
     bool clawHolding = false;
-    // Intake: X = forward on / off, B = reverse on / off (starts off). 1 = forward, -1 = reverse, 0 = off
+    // Intake: X = forward on / off, B = reverse on / off (starts off). 1 = forward, -1 = reverse, 0 = off.
+    // Letting go of A (after a flip) also turns it off.
     int intakeDirection = 0;
-    // Pin flipper: off at the start; Y flips it forward / reverse. 1 = forward, -1 = reverse, 0 = never pressed yet
-    int flipperState = 0;
-    bool flipperStalled = false;      // true once it couldn't move and turned itself off
-    uint32_t flipperStartMs = 0;      // when Y was last pressed
-    double flipperCheckPos = 0.0;     // motor position at the last stall check point
-    uint32_t flipperCheckMs = 0;      // time of the last stall check point
+    // Pin flipper: starts down (intake position) and off
+    bool flipperReturning = false;    // true while it's going back down after A was let go
+    bool aWasHeld = false;            // A last loop (to catch the moment it's let go)
+    bool flipperOverriding = false;   // DOWN / UP arrow was held last loop
+    double flipperCheckPos = 0.0;     // motor position the last time it moved FLIPPER_STALL_DEG
+    uint32_t flipperCheckMs = 0;      // when that was
     // Pin pickup state
     uint32_t r1PressStartMs = 0;
     uint32_t clawSlowStartMs = 0;
@@ -917,22 +703,8 @@ void opcontrol() {
 
         driverArcadeDrive(leftY, 0.9 * rightX);   // same feel as LemLib's chassis.arcade()
 
-        // (B used to turn auto height on / off here. B is the intake reverse now, further down;
-        //  auto height stays at AUTO_HEIGHT_ON_AT_START for the whole match.)
-
-        // Constantly watch the optical sensor for a goal change
-        updateGoalDetection();
-
-        // The auto lift press is finished once the lift reaches its target
-        if (autoLiftInProgress && std::fabs(dr4bTarget - getDR4BPosition()) <= AUTO_ARRIVE_TOLERANCE) {
-            autoLiftInProgress = false;
-        }
-
-        // Lift buttons
-        // Auto on:  L1 = single press goes to next stack height, L2 = manual down (unchanged)
-        // Auto off: L1 = manual up, L2 = manual down (original behavior)
-        bool l1Held = !autoHeightEnabled && controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1);
-        bool l1Pressed = autoHeightEnabled && controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_L1);
+        // Lift buttons: L1 = manual up, L2 = manual down
+        bool l1Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1);
         bool l2Held = controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2);
 
         // Lift zeroing only lasts while L2 is held
@@ -972,7 +744,7 @@ void opcontrol() {
         }
 
         // Tipping or a lift button always cancels a pin lift in progress
-        if (tipActive || l1Held || l1Pressed || l2Held) {
+        if (tipActive || l1Held || l2Held) {
             pinLiftActive = false;
         }
 
@@ -984,7 +756,6 @@ void opcontrol() {
             dr4bManualMode = true;
             dr4bTargetForced = false;
             dr4bSettling = false;
-            autoLiftInProgress = false;
             DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
             double position = getDR4BPosition();
@@ -1031,7 +802,6 @@ void opcontrol() {
             dr4bManualMode = true;
             dr4bTargetForced = false;
             dr4bSettling = false;
-            autoLiftInProgress = false;
             DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
             DR4B.move_velocity(DR4B_UP_SPEED);
 
@@ -1040,7 +810,6 @@ void opcontrol() {
             dr4bManualMode = true;
             dr4bTargetForced = false;
             dr4bSettling = false;
-            autoLiftInProgress = false;
             DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
 
             double position = getDR4BPosition();
@@ -1125,11 +894,6 @@ void opcontrol() {
                 // 4. Return brake mode back to coast so custom PID handles holding
                 DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
             }
-
-            // Auto stack press (overrides any settling in progress)
-            if (l1Pressed) {
-                autoLiftPress();
-            }
         }
         // Claw
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_R1)) {
@@ -1197,7 +961,7 @@ void opcontrol() {
 
                     // Only when the driver isn't moving the lift (the short settle after
                     // releasing L1/L2 is fine) and the lift is in the low zone
-                    if ((!dr4bManualMode || dr4bSettling) && !autoLiftInProgress && !tipActive
+                    if ((!dr4bManualMode || dr4bSettling) && !tipActive
                         && !l1Held && !l2Held
                         && liftPos >= PIN_LIFT_ZONE_MIN && liftPos <= PIN_LIFT_ZONE_MAX) {
                         pinLiftGoal = std::max(PIN_LIFT_HEIGHT, liftPos + PIN_LIFT_MIN_RISE);
@@ -1218,12 +982,6 @@ void opcontrol() {
                 clawSlow = false;
             }
         }
-        //code for the toggle mechanism, spins one way while holding A and stops when A is released
-        if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_A)) {
-            toggleMechanism.move_velocity(200); // Spins one way while holding A (change speed if needed)
-        } else {
-            toggleMechanism.move_velocity(0);   // Stops when A is released
-        }
 
         // Intake: X = forward on / off, B = reverse on / off. Pressing the other button switches straight over.
         if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_X)) {
@@ -1232,37 +990,55 @@ void opcontrol() {
         if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B)) {
             intakeDirection = (intakeDirection == -1) ? 0 : -1;
         }
-        intake.move_voltage(intakeDirection * INTAKE_VOLTAGE);
 
-        // Pin flipper: each Y press flips direction (first press = forward). It turns itself off when it can't move.
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
-            flipperState = (flipperState == 1) ? -1 : 1;
-            flipperStalled = false;
-            flipperStartMs = pros::millis();
-            flipperCheckMs = flipperStartMs;
-            flipperCheckPos = flipper.get_position();
-        }
-
-        // Stall check: has it turned at least FLIPPER_STALL_DEG in the last FLIPPER_STALL_MS?
-        if (flipperState != 0 && !flipperStalled) {
+        // Pin flipper: hold A = flip (and stay flipped), let go = back down to the intake position, then off
+        {
+            bool aHeld = controller.get_digital(pros::E_CONTROLLER_DIGITAL_A);
+            bool downHeld = controller.get_digital(pros::E_CONTROLLER_DIGITAL_DOWN);
+            bool upHeld = controller.get_digital(pros::E_CONTROLLER_DIGITAL_UP);
             uint32_t now = pros::millis();
-            double pos = flipper.get_position();
-            if (std::fabs(pos - flipperCheckPos) >= FLIPPER_STALL_DEG || now - flipperStartMs < FLIPPER_STALL_GRACE_MS) {
-                // still moving (or just started): new check point
-                flipperCheckPos = pos;
-                flipperCheckMs = now;
-            } else if (now - flipperCheckMs >= FLIPPER_STALL_MS) {
-                flipperStalled = true;   // can't move any more: off
-            }
-        }
 
-        if (flipperStalled || flipperState == 0) {
-            flipper.move_voltage(0);   // off = no power at all (coast), not held
-        } else if (flipperState == 1) {
-            flipper.move_velocity(FLIPPER_RPM);
-        } else {
-            flipper.move_velocity(-FLIPPER_REVERSE_RPM);
+            if (downHeld || upHeld) {
+                // Manual override: full speed while held, beats A. Let go = stop.
+                flipperReturning = false;
+                flipper.move_velocity(downHeld ? -FLIPPER_OVERRIDE_RPM : FLIPPER_OVERRIDE_RPM);
+            } else if (flipperOverriding) {
+                // Override just let go: stop, then back to normal A control next loop
+                flipper.move_voltage(0);
+            } else if (aHeld) {
+                // Flip forward and keep pushing while A is held (never turns off here, even when stalled)
+                flipperReturning = false;
+                flipper.move_velocity(FLIPPER_RPM);
+            } else {
+                if (aWasHeld) {
+                    // A just let go: start going back down, and turn the intake off
+                    flipperReturning = true;
+                    flipperCheckPos = flipper.get_position();
+                    flipperCheckMs = now;
+                    intakeDirection = 0;
+                }
+
+                if (flipperReturning) {
+                    flipper.move_velocity(-FLIPPER_DOWN_RPM);
+
+                    // Home once it hasn't moved FLIPPER_STALL_DEG for FLIPPER_RETURN_STALL_MS
+                    double pos = flipper.get_position();
+                    if (std::fabs(pos - flipperCheckPos) >= FLIPPER_STALL_DEG) {
+                        flipperCheckPos = pos;   // still moving
+                        flipperCheckMs = now;
+                    } else if (now - flipperCheckMs >= FLIPPER_RETURN_STALL_MS) {
+                        flipperReturning = false;   // stuck on its stop = home
+                    }
+                }
+
+                if (!flipperReturning) {
+                    flipper.move_voltage(0);   // off = no power at all (coast), not held
+                }
+            }
+            aWasHeld = aHeld;
+            flipperOverriding = downHeld || upHeld;
         }
+        intake.move_voltage(intakeDirection * INTAKE_VOLTAGE);   // after the flipper (letting go of A turns it off)
         // -----------------------------------------------
         pros::delay(20);
     }
