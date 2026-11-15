@@ -84,34 +84,5 @@ extern double dr4bSlewDown;   // top speed (degrees/second) the lift PID lowers 
 double getDR4BPosition();
 double getStackHeight(GoalType goal, int count);
 
-// Autonomous routines. They're on the brain screen's auton selector (runPreAutonomous() in src/rw-user.cpp).
-void twoPinAlliance();       // auton.cpp:       preload + 2 pins (right wall)
-void mirrorAlliance();       // autonmirror.cpp: 3-pin route, right wall or top wall (AUTON_START_ON_TOP in that file)
-void mirrorAllianceRight();  // autonmirror.cpp: 3-pin route from the right wall
-void mirrorAllianceTop();    // autonmirror.cpp: 3-pin route from the top wall
-void manyPinAlliance();      // skillsauto.cpp:  the 1-minute skills run
-void qualLeftAlliance();     // quals.cpp:       qual from the left wall: the skills opening (preload + both field pins)
-void qualRightAlliance();    // quals.cpp:       qual from the right wall: the left one mirrored (all angles swapped)
-void qualRedLeft();
-void qualRedBottom();
-void qualBlueRight();
-void qualBlueTop();
-void qualPreloadOnly();      // quals.cpp:       Blue Top start, toggle + preload only
-void qualPreloadRed();       // quals.cpp:       Red Bottom start, toggle + preload only
-
-// A qual route built from the skills opening: toggle -> preload -> both field pins onto one goal.
-// Every spot, heading and tuning value is in here, so each qual auton has its own (see src/quals.cpp).
-struct OpeningRoute {
-    double startX, startY, startHeading;   // start pose (inches, compass degrees)
-    double goalX, goalY;                   // the goal the preload and both pins go on
-    double preloadExtraDist;               // + = preload goes further onto the goal, - = shorter
-    double pin1X, pin1Y, pin1Heading;      // field pin 1, and the heading it's approached along
-    double pin1GrabTurn;                   // + = approach line turned more clockwise (comes in more to the RIGHT), - = left
-    double pin1GrabExtra;                  // + = drives further into the pin, - = shorter
-    double pin1ScoreExtra;                 // + = goes further onto the goal when scoring it, - = shorter
-    double pin2X, pin2Y, pin2Heading;      // field pin 2, and the heading it's approached along
-    double pin2GrabTurn, pin2GrabExtra, pin2ScoreExtra;   // same as pin 1
-    double lastBackup;                     // how far it backs off the goal after pin 2 (0 = stays there)
-};
-void runOpeningRoute(const OpeningRoute& route);   // skillsauto.cpp
-void runOpeningRoutePreloadOnly(const OpeningRoute& route);   // skillsauto.cpp: toggle + preload, no field pins
+// Autonomous: the 4-pin qual auton (src/fourpin.cpp, declared in include/fourpin.hpp).
+// It's on the brain screen's auton selector (runPreAutonomous() in src/rw-user.cpp).

@@ -1,5 +1,6 @@
-#include "robot.hpp"   // rw-config.h + the robot's autons (twoPinAlliance, manyPinAlliance, ...)
+#include "robot.hpp"   // rw-config.h + the robot's devices and lift functions
 #include "rw/hardware.h"   // hw::screenClear
+#include "fourpin.hpp"      // the 4-pin qual auton (src/fourpin.cpp)
 
 extern bool selector_running;   // RW's auton selector: false stops it (what runSelectedAuton() does first)
 
@@ -7,9 +8,9 @@ extern bool selector_running;   // RW's auton selector: false stops it (what run
 
 // Test that autonomous always runs, whatever is picked on the selector (for tuning with the controller's Timed Run):
 //   exampleAuton = "Tuning Test", squareTestAuton = "Square Test", exampleAuton2 = "Odom Test",
-//   odomCheckAuton = "Odom Check", sensorCheckAuton = "Sensor Check", manyPinAlliance = "Skills",
-//   qualLeftAlliance = "Qual Left", qualRightAlliance = "Qual Right", feedforwardAuton = "Feedforward", ...
-// SET IT BACK TO nullptr BEFORE A MATCH, or Skills / the qual autons won't run.
+//   odomCheckAuton = "Odom Check", sensorCheckAuton = "Sensor Check", fourPinRedBottom = "4Pin Red Bot",
+//   feedforwardAuton = "Feedforward", ...
+// SET IT BACK TO nullptr BEFORE A MATCH, or the 4-pin auton won't run.
 void (*const TIMED_RUN_TEST)() = nullptr;
 
 void runAutonomous() {
@@ -52,20 +53,17 @@ void runPreAutonomous() {
 
   // Autonomous routines for the selector, in the order they appear on the Brain screen (up to 12).
   // The first one is picked by default; the choice is saved on the SD card if one is in.
-  addAuton("Skills", manyPinAlliance);               // skillsauto.cpp: 1-minute skills run
-  addAuton("Red Left", qualRedLeft);       // back on the left wall
-  addAuton("Red Bottom", qualRedBottom);   // back on the bottom wall
-  addAuton("Blue Right", qualBlueRight);   // back on the right wall
-  addAuton("Blue Top", qualBlueTop);       // back on the top wall        // quals.cpp: Qual Left mirrored, from the right wall
-  // (the selector holds 12: "Odom Test" (exampleAuton2) made room for "Qual Right"; run it with TIMED_RUN_TEST)
+  // The 4-pin qual auton (src/fourpin.cpp): one route, four starts
+  addAuton("4Pin Red Bot", fourPinRedBottom);        // back on the bottom wall toggle (red)
+  addAuton("4Pin Blue Top", fourPinBlueTop);         // the same route turned 180 degrees, back on the top wall toggle (blue)
+  addAuton("4Pin Red Left", fourPinRedLeft);         // flipped across the pin diagonal, back on the left wall toggle (red)
+  addAuton("4Pin Blue Right", fourPinBlueRight);     // Red Left turned 180 degrees, back on the right wall toggle (blue)
+  // RW tuning / calibration tools (not match autons)
   addAuton("Odom Check", odomCheckAuton);            // push by hand, read X / Y / heading
   addAuton("Square Test", squareTestAuton);          // 24" square, should end at 0, 0, 0
   addAuton("Sensor Check", sensorCheckAuton);        // distance sensors, resets, MCL
   addAuton("IMU Scale", imuScaleAuton);              // measure imu_scale
   addAuton("Drive Calibration", calibrateDrive);     // for the simulator (see the docs: Simulator > Calibrating)
-  // ("Qual Left" (qualLeftAlliance) made room for "Preload Red": it ran the same route as "Red Left")
-  addAuton("Preload Only", qualPreloadOnly);         // quals.cpp: Blue Top start, toggle + preload only
-  addAuton("Preload Red", qualPreloadRed);           // quals.cpp: Red Bottom start, toggle + preload only
-  // (the selector holds 12, so "Feedforward" isn't listed: run it with TIMED_RUN_TEST = feedforwardAuton above)
+  // (the selector holds 12; "Feedforward" and "Odom Test" aren't listed: run them with TIMED_RUN_TEST above)
   startAutonSelector();
 }
