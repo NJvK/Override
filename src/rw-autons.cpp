@@ -4,7 +4,7 @@
 
 // Tuning and test routines. The robot's real autons are in auton.cpp, autonmirror.cpp and skillsauto.cpp.
 // IMPORTANT: Remember to add respective function declarations to include/rw-config.h
-// Then add each routine to the auton selector with addAuton() in runPreAutonomous() (src/rw-user.cpp)
+// Then list each routine (commented out) in runAutonomous() (src/rw-user.cpp)
 
 namespace {
 // Prints on the controller's three lines, one line every 60 ms (the controller only takes one print every 50 ms)

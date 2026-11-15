@@ -85,4 +85,17 @@ double getDR4BPosition();
 double getStackHeight(GoalType goal, int count);
 
 // Autonomous: the 4-pin qual auton (src/fourpin.cpp, declared in include/fourpin.hpp).
-// It's on the brain screen's auton selector (runPreAutonomous() in src/rw-user.cpp).
+// Call it from runAutonomous() in src/rw-user.cpp.
+
+// AI Vision sensor behind the claw (pins / cups; it does not see AprilTags). The 4-pin auton aims with it and the brain screen
+// shows what it sees.
+constexpr int AI_VISION_PORT = 5;
+// Pins / cups the model is less sure about than this are ignored (the 4-pin auton's aiming, and greyed out on the
+// brain screen). 0 = use everything. Run the "AI Vision Tuning" auton (aiVisionTuningAuton) to see the scores the
+// real pins get in your lighting, then set this a bit under them to cut out false detections.
+constexpr int AI_VISION_MIN_SCORE = 0;
+
+// Brain screen (src/brain-screen.cpp): X / Y / heading, MCL, and what the AI Vision sensor sees. Started by
+// runPreAutonomous(). It stays off during autonomous; after an auton, tap the screen to bring it back (so a tuning
+// test's results stay up until you've read them).
+void startBrainScreen();

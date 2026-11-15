@@ -15,7 +15,7 @@ pros::MotorGroup& rightMotors = right_chassis;
 // src/rw-config.cpp: tracking wheel ports / sizes / offsets, track width, drive and turn PID, IMU scale,
 // and the new Monte Carlo localization (MCL) + distance sensor settings.
 // TUNING_TEST is gone: the tests (PID test, odometry check, square test, IMU scale, sensor check)
-// are picked on the brain screen's auton selector, like any auton.
+// are called from runAutonomous() in src/rw-user.cpp, like any auton (there's no auton selector).
 // =====================================================================
 
 // IMU: the same sensor RW uses (inertial_sensor, port set in src/rw-config.cpp).
@@ -32,9 +32,8 @@ constexpr float DRIVE_CURVE_MIN_OUTPUT = 10;
 constexpr float DRIVE_CURVE_GAIN = 1.019;
 
 // ---------------- Controller readout ----------------
-// The brain screen belongs to RW's auton selector now (it shows X / Y / heading and MCL there),
-// so the old brain screen readouts are on the CONTROLLER screen, lines 2 and 3 (line 1 = selected auton),
-// during driver control (disabled = the selector uses the controller, auton = the tuning tests use it).
+// The old brain screen readouts are on the CONTROLLER screen, lines 2 and 3, during driver control
+// (in auton the tuning tests print their own numbers there).
 //   0 = lift:         "L<lift> H<hold> C<claw rpm>"
 //   2 = counters:      "Pin <pin lifts> Zero <zeroes>" / "Roll <IMU roll>"
 //   3 = distance sensors, inches (-- = sees nothing): "F<front> R<right>" / "B<back> L<left>"
@@ -62,7 +61,7 @@ constexpr int INTAKE_VOLTAGE = 12000;      // intake power when on (12000 = full
 // instead of getting stuck.
 constexpr int FLIPPER_PORT = 3;
 pros::Motor flipper(-FLIPPER_PORT);         // reversed; use FLIPPER_PORT (no minus) to flip it back
-constexpr int FLIPPER_RPM = 75;             // flipper speed going up / flipping (rpm)
+constexpr int FLIPPER_RPM = 110;            // flipper speed going up / flipping (rpm). Auton uses the same (FP_FLIP_RPM in fourpin.cpp)
 constexpr int FLIPPER_DOWN_RPM = 75;        // flipper speed going back down to the intake position (rpm)
 // Manual override (if it jams): hold DOWN arrow = force it down, hold UP arrow = force it up, at this speed.
 // Let go and it stops (off); A works normally again after.
@@ -556,7 +555,7 @@ double getStackHeight(GoalType goal, int count) {
 // Initialize
 void initialize() {
     // RW: calibrates the IMU (keep the robot still ~2 s), starts odometry (+ MCL if it's on in
-    // src/rw-config.cpp) and shows the auton selector on the brain screen. Replaces chassis.calibrate().
+    // src/rw-config.cpp). Replaces chassis.calibrate(). (No auton selector: see runAutonomous() in src/rw-user.cpp.)
     runPreAutonomous();
 
     // Make the lift rotation sensor update every 5 ms (default is 20 ms) so the PID
@@ -583,8 +582,7 @@ void initialize() {
 
     // Readouts on the controller screen (see CONTROLLER_READOUT). One controller print gets through
     // every 50 ms, so lines 2 and 3 take turns.
-    // Only during driver control: while disabled the controller shows RW's auton selector (the arrows
-    // pick the auton), and in auton the tuning tests print their own numbers there.
+    // Only during driver control: in auton the tuning tests print their own numbers there.
     static pros::Task screenTask([]() {
         bool secondLine = false;
         while (true) {
@@ -626,13 +624,11 @@ void competition_initialize() {}
 // Disabled (before auton, and between auton and driver): nothing to do
 void disabled() {}
 
-// Autonomous selector (only runs when field control / a competition switch starts autonomous)
+// Autonomous (only runs when field control / a competition switch starts autonomous)
 void autonomous() {
     dr4bSlewDown = DR4B_AUTON_SLEW_DOWN;   // lift lowers a little slower in auton
 
-    // Runs the auton picked on the brain screen (tap it, or the controller arrows while disabled):
-    // Skills, the qual routes, or a tuning test. The list is in runPreAutonomous() (src/rw-user.cpp).
-    // The choice is saved on the SD card (if one is in) so it survives restarts.
+    // Runs whichever auton is uncommented in runAutonomous() (src/rw-user.cpp).
     runAutonomous();
 }
 
@@ -667,6 +663,7 @@ void opcontrol() {
     bool flipperReturning = false;    // true while it's going back down after A was let go
     bool aWasHeld = false;            // A last loop (to catch the moment it's let go)
     bool flipperOverriding = false;   // DOWN / UP arrow was held last loop
+    bool flipperUpOverriding = false; // UP arrow (flipper forward, intake on) was held last loop
     double flipperCheckPos = 0.0;     // motor position the last time it moved FLIPPER_STALL_DEG
     uint32_t flipperCheckMs = 0;      // when that was
     // Pin pickup state
@@ -1000,15 +997,20 @@ void opcontrol() {
 
             if (downHeld || upHeld) {
                 // Manual override: full speed while held, beats A. Let go = stop.
+                // UP spins the flipper forward, so the intake spins forward with it (off again when UP is let go).
                 flipperReturning = false;
                 flipper.move_velocity(downHeld ? -FLIPPER_OVERRIDE_RPM : FLIPPER_OVERRIDE_RPM);
+                if (upHeld && !downHeld) intakeDirection = 1;
             } else if (flipperOverriding) {
                 // Override just let go: stop, then back to normal A control next loop
                 flipper.move_voltage(0);
+                if (flipperUpOverriding) intakeDirection = 0;   // UP let go: intake off
             } else if (aHeld) {
-                // Flip forward and keep pushing while A is held (never turns off here, even when stalled)
+                // Flip forward and keep pushing while A is held (never turns off here, even when stalled).
+                // The intake spins forward with it; letting go of A turns it off (below).
                 flipperReturning = false;
                 flipper.move_velocity(FLIPPER_RPM);
+                intakeDirection = 1;
             } else {
                 if (aWasHeld) {
                     // A just let go: start going back down, and turn the intake off
@@ -1037,6 +1039,7 @@ void opcontrol() {
             }
             aWasHeld = aHeld;
             flipperOverriding = downHeld || upHeld;
+            flipperUpOverriding = upHeld && !downHeld;
         }
         intake.move_voltage(intakeDirection * INTAKE_VOLTAGE);   // after the flipper (letting go of A turns it off)
         // -----------------------------------------------

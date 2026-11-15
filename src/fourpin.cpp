@@ -5,22 +5,25 @@
 // timing, the tip guard, the AI Vision aiming and the 15 s timer. It shares nothing with skillsauto.cpp.
 //
 // The route (drawn for RED, back on the BOTTOM wall toggle; the other three starts are the same route turned
-// or flipped, see include/fourpin.hpp):
+// or flipped, see include/fourpin.hpp). It never holds two loose pins at once: the intake pin goes into the
+// wall cup before the robot picks up anything else.
 //   start  lift up FP_TOGGLE_LIFT_DEG and straight back down (drops the toggles), then drive off the toggle
-//   1      curve left into the alliance goal, claw open, lift down; flip the preload onto the goal
+//   1      curve left into the alliance goal, claw open, lift down; flip the preload onto the goal (alliance pin 1)
 //   2      back out and curve BACKWARDS into the red pin of the 4-pin cluster (intake on the back of the robot)
-//   3      forward around the small red pin, pick up pin 3 with the claw without stopping, curve left into the
-//          goal while the lift goes up, let go
-//   4      back out while the lift drops, swing the nose at pin 4, pick it up on the way through, curve left
-//          into the goal (one height higher), let go
-//   5      back out, swing the nose at the wall cup, drive into it and the wall with the claw spinning closed,
-//          back off with the lift going up to score, flip the intake pin over into the cup on the way, drive into the
-//          goal, flipper back down, let go and lower. The lift goes limp just before 15 s.
+//   3      forward, curving down past the left of the neutral goal into the wall cup below it, claw spinning
+//          closed, into the wall for a good lock
+//   4      back off the wall with the lift going up, flip the intake pin into the cup on the way, swing round
+//          and drive into the NEUTRAL goal from the left, flipper back down, let go (neutral pin 2)
+//   5      back out while the lift drops and swing the nose up-left, pick up the middle field pin on the way
+//          through, curve left into the alliance goal from above, let go (alliance pin 2)
+//   6      back out, swing the nose at the corner field pin, pick it up on the way through, curve left into
+//          the alliance goal from the lower left, let go and lower (alliance pin 3). Lift limp just before 15 s.
 //
 // How it drives: every move is a smooth curve (no turn-in-place, no straight-line PID moves). A curve is a few
 // "nodes" (a spot + the way the robot points there); the follower drives through them with the speed planned
-// ahead (slower in tight curves, slowing down in time for the end). It only stops where it has to: at the goal
-// (to let go), at the intake pin, and where it switches between forwards and backwards.
+// ahead (slower in tight curves, slowing down in time for the end). It only stops where it has to: at a goal
+// (to let go), at the intake pin, against the wall at the cup, and where it switches between forwards and
+// backwards (it doesn't settle there, it carries a little speed through the switch).
 //
 // Field: (0, 0) is the field center, +X right, +Y up, walls at +-70.25. Headings: 0 = up, 90 = right, clockwise.
 // All the spots below are for RED BOTTOM. The code turns / flips them for the other starts.
@@ -64,10 +67,13 @@ constexpr double FP_START_X = 0.0;
 constexpr double FP_START_Y = -FP_FIELD_HALF + FP_CENTER_TO_BACK;   // -61.25: back on the wall
 constexpr double FP_START_HEADING = 0.0;
 constexpr double FP_GOAL_X = -23.55, FP_GOAL_Y = -47.09;       // alliance goal
+constexpr double FP_NEUTRAL_X = 23.55, FP_NEUTRAL_Y = -47.09;  // neutral goal on our side (right of the start)
 constexpr double FP_PIN2_TIP_X = 17.0, FP_PIN2_TIP_Y = -23.55; // tip of the red cluster pin that points at the goal side
 constexpr double FP_PIN3_X = -23.55, FP_PIN3_Y = -23.55;       // field pin on the diagonal, near the middle
 constexpr double FP_PIN4_X = -47.09, FP_PIN4_Y = -47.09;       // field pin on the diagonal, near the corner
-constexpr double FP_CUP5_X = -26.2, FP_CUP5_Y = -68.7;         // wall cup (the left one of the pair below the goal)
+// Wall cup: the left one of the pair below the neutral goal. It sits 2.65" left of the goal, the same as the
+// cup the old route took from below the alliance goal, so the cup -> goal moves are the same shape as before.
+constexpr double FP_CUP_X = 20.9, FP_CUP_Y = -68.7;
 
 // =====================================================================
 //   ROUTE SHAPE (the way the robot points at each spot, and the spots where it switches direction)
@@ -76,38 +82,80 @@ constexpr double FP_PRELOAD_HEADING = 265.0;    // pointing at the goal for the 
 // Backing into the cluster pin. 270 would be straight in line with the pin, but an 18" robot doesn't fit between
 // the pin's tip and the small red pin at (0, -23.55), so it comes in at an angle with its nose below that pin.
 constexpr double FP_PIN2_HEADING = 228.0;
-constexpr double FP_PIN3_HEADING = 300.0;       // driving through pin 3
+constexpr double FP_CUP_HEADING = 140.0;        // driving into the wall cup (squarer than this and the back corner gets too close to the neutral goal)
+constexpr double FP_NEUTRAL_SCORE_HEADING = 85.0;  // scoring the cup on the neutral goal (comes at it from the left)
+// Inches of straight run into the neutral goal after the swing round from the wall (the lift finishes climbing
+// on it). The neutral height is low, so this is much shorter than the old 16" run for the 4th alliance pin.
+constexpr double FP_NEUTRAL_SCORE_RUN = 10.0;
+// Backs up to here from the neutral goal, nose swung up and left toward the middle field pin
+constexpr double FP_TURN3_X = 2.0, FP_TURN3_Y = -54.0, FP_TURN3_HEADING = 20.0;
+constexpr double FP_PIN3_HEADING = 300.0;       // driving through pin 3 (the middle field pin)
 constexpr double FP_PIN3_SCORE_HEADING = 165.0; // scoring pin 3 (comes at the goal from above)
 constexpr double FP_TURN4_X = -25.4, FP_TURN4_Y = -27.1, FP_TURN4_HEADING = 222.0;   // backs up to here, nose swung at pin 4
 constexpr double FP_PIN4_HEADING = 225.0;       // driving through pin 4, along the diagonal between the two red goals
 constexpr double FP_PIN4_SCORE_HEADING = 65.0;  // scoring pin 4 (comes at the goal from the lower left)
-constexpr double FP_TURN5_X = -43.5, FP_TURN5_Y = -51.0, FP_TURN5_HEADING = 135.0;   // backs up to here, nose swung at the cup
-constexpr double FP_CUP5_HEADING = 140.0;       // driving into the wall cup (squarer than this and the back corner gets too close to the goal)
-constexpr double FP_CUP5_SCORE_HEADING = 85.0;  // scoring the cup (comes at the goal from the left)
-constexpr double FP_CUP5_SCORE_RUN = 16.0;      // inches of straight run into the goal for the last score
-constexpr double FP_GOAL_LEAD_IN = 6.0;         // inches of straight run into the goal (the goal has to slide into the claw opening)
+constexpr double FP_GOAL_LEAD_IN = 6.0;         // inches of straight run into a goal (the goal has to slide into the claw opening)
+constexpr double FP_CUP_LEAD_IN = 5.0;          // inches of straight run into the wall cup
 // Inches straight back before the nose starts to swing (so the front corners miss the goal)
 constexpr double FP_PRELOAD_BACK_OUT = 5.0;     // from the goal after the preload
+constexpr double FP_NEUTRAL_BACK_OUT = 5.0;     // from the neutral goal after the cup
 constexpr double FP_PIN3_BACK_OUT = 6.0;        // from the goal after pin 3
-constexpr double FP_PIN4_BACK_OUT = 8.0;        // from the goal after pin 4
 constexpr double FP_WALL_BACK_OUT = 2.0;        // from the wall cup
 constexpr double FP_START_STRAIGHT = 5.0;       // inches straight off the toggle before it starts to curve
-constexpr double FP_PIN2_STRAIGHT_OUT = 7.0;    // inches straight away from the cluster pin before it curves (its nose is next to the small red pin)
+// Inches straight away from the cluster pin before it curves toward the cup. At the cluster pin the small red pin
+// at (0, -23.55) is ~2" off the robot's right side, and curving left swings the right side into it, so the robot
+// drives on until the small pin is behind it first. Shorter than ~15 and it clips the small pin.
+constexpr double FP_PIN2_STRAIGHT_OUT = 16.0;
+constexpr double FP_PIN2_SWING_TANGENT = 4.0;   // how gently the curve leaves that straight (lower = turns sooner after it)
 constexpr double FP_PIN_LEAD_IN = 5.0;          // inches of straight run into a pin
 constexpr double FP_PIN_LEAD_OUT = 3.0;         // inches straight on after grabbing before it curves away
 
 // Fine tuning per spot (inches, + = further forward)
 constexpr double FP_PRELOAD_EXTRA = 0.0;
 constexpr double FP_PIN2_EXTRA = 4.0;           // + = backs further into the cluster pin (the auton line guard still stops it)
+constexpr double FP_NEUTRAL_SCORE_EXTRA = 1.0;
 constexpr double FP_PIN3_GRAB_EXTRA = 0.0;
 constexpr double FP_PIN3_SCORE_EXTRA = 0.0;
 constexpr double FP_PIN4_GRAB_EXTRA = 0.0;
 constexpr double FP_PIN4_SCORE_EXTRA = 0.0;
-constexpr double FP_CUP5_SCORE_EXTRA = 1.0;
 
 // The auton line (the double diagonal line through the cluster). The back corners stay at least this far on
 // our side of it while backing into the cluster pin; if one gets closer the robot stops backing right there.
 constexpr double FP_LINE_MARGIN = 1.5;
+
+// =====================================================================
+//   WAITS AND SLOWDOWNS (all the timing knobs in one place)
+// =====================================================================
+// ---- STOPS: the robot sits still this long (ms) ----
+constexpr int FP_PRELOAD_FLIP_WAIT_MS = 500;     // at the alliance goal while the preload flips, then backs away
+constexpr int FP_INTAKE_DWELL_MS = 600;          // at the cluster pin while the intake takes it
+constexpr int FP_WALL_PUSH_MS = 600;             // pushing into the wall on the cup while the claw locks on...
+constexpr int FP_CUP_EXTRA_WAIT_MS = 150;        // ...then stopped this much longer (claw still squeezing) before backing off
+constexpr int FP_NEUTRAL_RELEASE_MS = 300;       // at the neutral goal after the claw starts opening
+constexpr int FP_ALLIANCE_RELEASE_MS = 300;      // at the alliance goal after the claw starts opening (both field pins)
+// Settle: stopped at the goal this long BEFORE the claw opens (lets the lift finish / stop bouncing). 0 = lets go
+// as soon as it arrives.
+constexpr int FP_NEUTRAL_SETTLE_MS = 0;          // cup on the neutral goal
+constexpr int FP_PIN3_SETTLE_MS = 0;             // middle field pin on the alliance goal
+constexpr int FP_PIN4_SETTLE_MS = 0;             // corner field pin on the alliance goal
+
+// ---- SLOWDOWNS: never a stop. The robot drives the last stretch before a spot at a slow speed instead. ----
+// The number is how long (ms) it spends at that slow speed before the spot: 0 = off (normal speed, like now),
+// higher = it drops to the slow speed earlier. The slow stretch is (slow speed x time) inches long, and the
+// robot brakes down to the slow speed before it, the same as for any other slow part of a curve.
+// Into pins / the cup (more time to line up and grab):
+constexpr double FP_PICKUP_SLOW_SPEED = 15.0;    // in/s
+constexpr int FP_CLUSTER_PIN_SLOW_MS = 0;        // backing into the cluster pin (intake)
+constexpr int FP_CUP_SLOW_MS = 0;                // into the wall cup
+constexpr int FP_PIN3_SLOW_MS = 0;               // through the middle field pin
+constexpr int FP_PIN4_SLOW_MS = 0;               // through the corner field pin
+// Into a goal before scoring (e.g. the lift can't reach its height fast enough: this gives it more time while the
+// robot keeps moving, instead of stopping at the lift gate):
+constexpr double FP_SCORE_SLOW_SPEED = 12.0;     // in/s
+constexpr int FP_PRELOAD_SCORE_SLOW_MS = 0;      // preload into the alliance goal
+constexpr int FP_NEUTRAL_SCORE_SLOW_MS = 0;      // cup into the neutral goal (at most the 10" run-in after the swing round)
+constexpr int FP_PIN3_SCORE_SLOW_MS = 0;         // middle field pin into the alliance goal
+constexpr int FP_PIN4_SCORE_SLOW_MS = 0;         // corner field pin into the alliance goal
 
 // =====================================================================
 //   DRIVING
@@ -140,8 +188,8 @@ constexpr double FP_TALL_SPEED = 30.0;       // in/s
 constexpr double FP_TALL_ACCEL = 90.0;       // speeding up / slowing down with the lift at HI
 // While the lift is up or headed up to score (and on the way back down after letting go), the drive is capped at
 // this too, so the lift can't tip it. Lower = safer, slower. Only for heights more than FP_MOVING_SLOW_MARGIN above
-// the 2nd pin's scoring height (FP_PIN3_STACK), so scoring the 2nd pin on the goal isn't slowed.
-constexpr double FP_MOVING_SLOW_MARGIN = 20.0;  // lift degrees above the 2nd pin's height
+// alliance pin 2's height, so alliance pin 2 and the neutral goal aren't slowed (only alliance pin 3 is).
+constexpr double FP_MOVING_SLOW_MARGIN = 20.0;  // lift degrees above alliance pin 2's height
 constexpr double FP_MOVING_SPEED = 20.0;        // in/s
 constexpr double FP_MOVING_ACCEL = 70.0;        // speeding up, in/s per second
 // A move ends if the robot is being told to drive but hasn't moved for this long (it's against something)
@@ -154,11 +202,23 @@ constexpr double FP_TOGGLE_LIFT_DEG = 50.0;      // start: lift goes up this far
 constexpr int FP_TOGGLE_UP_MAX_MS = 400;         // ...(gives up after this long)
 constexpr double FP_TOGGLE_GO_DEG = 20.0;        // ...and the robot drives off once it's back down to this
 constexpr int FP_TOGGLE_DOWN_MAX_MS = 400;
-// Scoring heights: which entry of ALLIANCE_HEIGHTS in main.cpp each one uses (1 = lowest). The preload is
-// flipped onto the empty goal with the lift down, so pin 3 is the 2nd thing on the goal.
-constexpr int FP_PIN3_STACK = 2;
-constexpr int FP_PIN4_STACK = 3;
-constexpr int FP_CUP5_STACK = 4;
+// ---- SCORING HEIGHTS (lift degrees). The same numbers on all four starts. ----
+// The alliance and neutral goals start at different heights, so each has its own list, one entry per thing on
+// the goal (entry 1 = the 1st thing on it). Read a height with the lift readout (CONTROLLER_READOUT 0, "L").
+// Alliance: pin 1 is the preload, flipped on with the lift DOWN (no height used). Pins 2-3 = the two field pins.
+constexpr double FP_ALLIANCE_HEIGHTS[] = {
+    0.0,      // pin 1: preload (lift down, flipper puts it on)
+    256.11,   // pin 2: middle field pin   (= ALLIANCE_HEIGHTS[1] in main.cpp)
+    368.52,   // pin 3: corner field pin   (= ALLIANCE_HEIGHTS[2] in main.cpp)
+};
+// Neutral: the wall cup (with the intake pin flipped into it) goes on as the 2nd thing.
+constexpr double FP_NEUTRAL_HEIGHTS[] = {
+    0.0,      // pin 1: not scored by this auton
+    85.0,     // pin 2: wall cup + intake pin   PLACEHOLDER: MEASURE THIS (old untested neutral guess)
+};
+constexpr int FP_ALLIANCE_FIELD_PIN3_SPOT = 2;   // middle field pin -> alliance pin 2
+constexpr int FP_ALLIANCE_FIELD_PIN4_SPOT = 3;   // corner field pin -> alliance pin 3
+constexpr int FP_NEUTRAL_CUP_SPOT = 2;           // wall cup -> neutral pin 2
 constexpr double FP_LIFT_READY_TOLERANCE = 15.0; // lift counts as up when within this of its height
 // Pickup hop: when the claw closes on a pin / cup off the field (not the intake), the lift hops up a little, the
 // same as driver control's pin pickup (PIN_LIFT_HEIGHT / PIN_LIFT_MIN_RISE / PIN_LIFT_VOLTAGE in robot.hpp).
@@ -167,7 +227,7 @@ constexpr int FP_PICKUP_LIFT_DELAY_MS = 100;
 // The robot won't go closer to the goal than this until the lift is up (so the pin can't hit the stack)
 constexpr double FP_SCORE_GATE_IN = 7.0;
 constexpr int FP_GATE_MAX_MS = 1500;             // ...but it stops waiting after this long
-// Last score (the cup): instead of stopping at the gate to wait for the lift, it works out how long the lift still
+// Neutral score (the cup): instead of stopping at the gate to wait for the lift, it works out how long the lift still
 // needs and drives just fast enough (never over FP_MOVING_SPEED) to reach the gate as the lift gets there. It only
 // stops at the gate if the lift is later than this guess.
 constexpr double FP_LIFT_UP_DPS = 550.0;         // about how fast the lift climbs (deg/s); lower = drives in slower
@@ -175,12 +235,12 @@ constexpr double FP_GATE_CREEP_MIN = 4.0;        // never slower than this while
 constexpr double FP_GATE_ETA_BUFFER_S = 0.1;     // aims to reach the gate this long after the lift is up (so it never brakes there)
 constexpr double FP_LOWER_AFTER_BACK_IN = 2.0;   // after letting go, the lift starts down once it has backed this far
 constexpr double FP_CUP_FLIP_LIFT_DEG = 30.0;    // the pin flips into the cup once the lift has climbed this far (it keeps going up)
+constexpr int FP_CUP_FLIP_MIN_MS = 450;          // the flipper stays up at least this long so the pin lands in the cup before it comes back down
 // Lowering: full power down, then a gentle push for the last bit, then a light hold on the bottom
 constexpr double FP_GROUND_FAST_ABOVE = 30.0;    // full power down while above this
 constexpr int FP_GROUND_PUSH_MV = 4000;
 constexpr int FP_GROUND_HOLD_MV = 1200;
 constexpr int FP_GROUND_PUSH_MAX_MS = 400;
-
 // =====================================================================
 //   CLAW, FLIPPER, INTAKE
 // =====================================================================
@@ -191,23 +251,20 @@ constexpr int FP_CLAW_HOLD_MV = 2000;            // hold squeeze (same as driver
 // control. Motor off = it closes by itself.
 constexpr double FP_CLAW_OPEN_DIST = 18.0;       // claw starts opening this many inches before a pin
 constexpr double FP_GRAB_TOLERANCE = 3.0;        // claw closes when the pin is this close to the middle of the claw
-constexpr int FP_SCORE_RELEASE_MS = 150;         // wait at the goal after the claw starts opening
 constexpr double FP_CLAW_OFF_AFTER_BACK_IN = 5.0;   // claw motor off once it has backed this far from the goal
-constexpr int FP_FLIP_RPM = 75;                  // flipper up
+constexpr int FP_FLIP_RPM = 110;                 // flipper up (flipping), same as FLIPPER_RPM in main.cpp
 constexpr int FP_FLIP_DOWN_RPM = 50;             // flipper back down
 constexpr double FP_PRELOAD_CLAW_OPEN_AFTER_IN = 6.0;   // claw starts opening once it has driven this far off the toggle
-constexpr int FP_PRELOAD_FLIP_WAIT_MS = 500;     // preload: stopped at the goal this long while it flips, then backs away
 constexpr double FP_FLIPPER_DOWN_AFTER_IN = 5.0; // after the preload, flipper goes back down once backed this far (after lift down + claw off)
 constexpr double FP_FLIPPER_STALL_DEG = 5.0;     // going down: moved less than this...
 constexpr int FP_FLIPPER_STALL_MS = 500;         // ...for this long = it's home, motor off
 constexpr int FP_FLIPPER_DOWN_MAX_MS = 2000;
-constexpr double FP_FLIPPER_BACK_BEFORE_IN = 7.0;   // last score: flipper goes back down this far before the goal (once the lift is up)
+constexpr double FP_FLIPPER_BACK_BEFORE_IN = 7.0;   // neutral score: flipper goes back down this far before the goal (once the lift is up)
 constexpr int FP_INTAKE_MV = 12000;
 constexpr double FP_INTAKE_ON_DIST = 14.0;       // intake starts this many inches before the cluster pin
-constexpr int FP_INTAKE_DWELL_MS = 600;          // wait at the cluster pin while the intake takes it
-constexpr int FP_INTAKE_KEEP_MS = 6000;          // intake keeps running this long after it leaves the pin
-constexpr int FP_WALL_PUSH_MV = 6000;            // push into the wall on the cup...
-constexpr int FP_WALL_PUSH_MS = 500;             // ...for this long
+constexpr int FP_INTAKE_KEEP_MS = 6000;          // intake keeps running this long after it leaves the pin (it also stops when the pin is flipped into the cup)
+constexpr double FP_CUP_CLAW_ON_DIST = 15.0;     // claw starts spinning closed this many inches before the wall cup
+constexpr int FP_WALL_PUSH_MV = 6000;            // push into the wall on the cup (for FP_WALL_PUSH_MS)
 // The drive into the wall ends when the robot stops moving (it's on the wall). Backup: it also ends once odometry
 // says the front corner is this far PAST the wall, which can only mean it's there.
 constexpr double FP_WALL_OVERDRIVE = 1.0;
@@ -236,7 +293,7 @@ constexpr int FP_COAST_BEFORE_END_MS = 150;      // lift PID off and motors limp
 // Pin camera: on the drivetrain under the claw, in the middle, looking straight ahead. On the way into a pin it
 // finds the pin / cup and nudges the curve sideways so the pin ends up in the middle of the claw.
 constexpr bool FP_USE_PIN_VISION = true;
-constexpr int FP_PIN_CAM_PORT = 5;
+constexpr int FP_PIN_CAM_PORT = AI_VISION_PORT;   // include/robot.hpp (the brain screen reads the same sensor)
 constexpr int FP_PIN_CLASS_ID = -1;              // -1 = any object the Override model finds, or one class id
 constexpr double FP_PIN_CAM_FORWARD = 6.0;       // inches the camera sits in front of the tracking center
 constexpr double FP_PIN_CAM_YAW = 0.0;           // degrees the camera points right of straight ahead (0 = straight)
@@ -433,6 +490,16 @@ bool liftReady() {
 }
 bool liftIsDown() { return getDR4BPosition() <= 5.0; }
 
+// Lift height for a spot on a goal, from the height lists at the top (1 = 1st thing on the goal). Kept above the
+// lift PID's bottom deadzone, the same as getStackHeight() in main.cpp.
+template <size_t N>
+double heightFor(const double (&list)[N], int spot) {
+    double height = list[std::min(std::max(spot, 1), static_cast<int>(N)) - 1];
+    return std::max(height, DR4B_BOTTOM_DEADZONE + 1.0);
+}
+double allianceHeight(int spot) { return heightFor(FP_ALLIANCE_HEIGHTS, spot); }
+double neutralHeight(int spot) { return heightFor(FP_NEUTRAL_HEIGHTS, spot); }
+
 // =====================================================================
 //   CLAW
 // =====================================================================
@@ -459,10 +526,18 @@ FlipMode fpFlipMode = FlipMode::off;
 uint32_t fpFlipSinceMs = 0;
 double fpFlipCheckPos = 0.0;
 uint32_t fpFlipCheckMs = 0;
+
+bool fpIntakeOn = false;
+uint32_t fpIntakeOffAtMs = 0;   // 0 = no off time set
+
+// Flipping: the intake spins forward the whole time the flipper is flipping (same as holding A in driver control),
+// and turns off when the flipper goes back down (same as letting go of A)
 void flipperUp() {
     if (fpFlipMode == FlipMode::up) return;
     fpFlipMode = FlipMode::up;
     fpFlipSinceMs = pros::millis();
+    fpIntakeOn = true;
+    fpIntakeOffAtMs = 0;   // no timer: it stays on until the flipper comes back down
 }
 void flipperDown() {
     if (fpFlipMode != FlipMode::up) return;   // only from the flipped position
@@ -470,10 +545,8 @@ void flipperDown() {
     fpFlipSinceMs = pros::millis();
     fpFlipCheckPos = flipper.get_position();
     fpFlipCheckMs = fpFlipSinceMs;
+    fpIntakeOn = false;
 }
-
-bool fpIntakeOn = false;
-uint32_t fpIntakeOffAtMs = 0;   // 0 = no off time set
 
 // =====================================================================
 //   TIP GUARD
@@ -544,6 +617,7 @@ bool cameraBearing(AimKind kind, double expectedBearing, double& bearing) {
         } else {
             if (!(seen.type & pros::E_AIVISION_DETECTED_OBJECT)) continue;
             if (FP_PIN_CLASS_ID >= 0 && seen.id != FP_PIN_CLASS_ID) continue;
+            if (seen.object.element.score < AI_VISION_MIN_SCORE) continue;   // too unsure (include/robot.hpp)
             centerPx = seen.object.element.xoffset + seen.object.element.width / 2.0;
         }
         if (tags ? FP_GOAL_CAM_UPSIDE_DOWN : FP_PIN_CAM_UPSIDE_DOWN) centerPx = FP_CAM_WIDTH_PX - centerPx;
@@ -827,6 +901,25 @@ Curve makeCurve(const std::vector<Node>& nodes, bool reverse, double maxSpeed, d
     return curve;
 }
 
+// Slowdown (WAITS AND SLOWDOWNS): the stretch of the curve that ends endAt inches along it is capped at speed, long
+// enough to take ms at that speed. The speed plan before it brakes down in time, so it's a smooth slowdown, never
+// a stop. ms <= 0 = no change.
+void addSlowdown(Curve& curve, double endAt, int ms, double speed) {
+    int n = static_cast<int>(curve.points.size());
+    if (ms <= 0 || n < 2) return;
+    speed = std::max(speed, FP_MIN_SPEED);
+    double length = speed * ms / 1000.0;
+    int last = std::min(std::max(static_cast<int>(std::lround(endAt / FP_SAMPLE_STEP)), 0), n - 1);
+    int first = std::max(static_cast<int>(std::lround((endAt - length) / FP_SAMPLE_STEP)), 0);
+    for (int i = first; i <= last; i++) curve.points[i].speed = std::min(curve.points[i].speed, speed);
+    for (int i = n - 1; i > 0; i--) {   // braking pass again, so it slows down before the slow stretch
+        double before = std::sqrt(curve.points[i].speed * curve.points[i].speed + 2.0 * FP_DECEL * FP_SAMPLE_STEP);
+        curve.points[i - 1].speed = std::min(curve.points[i - 1].speed, before);
+    }
+}
+// The same, for a stretch that ends at the end of the curve
+void addSlowdownAtEnd(Curve& curve, int ms, double speed) { addSlowdown(curve, curve.length(), ms, speed); }
+
 // =====================================================================
 //   FOLLOWER
 // =====================================================================
@@ -862,7 +955,7 @@ double speedCapNow(double& accelNow) {
     double cap = FP_MAX_SPEED + (FP_TALL_SPEED - FP_MAX_SPEED) * tall;
     // Scoring drive: from the moment the lift is told to go up to a scoring height, until it's back down below
     // the slow height after letting go (covers lifting on the way in and lowering on the way out)
-    const double slowAbove = getStackHeight(GOAL_ALLIANCE, FP_PIN3_STACK) + FP_MOVING_SLOW_MARGIN;
+    const double slowAbove = allianceHeight(2) + FP_MOVING_SLOW_MARGIN;
     bool headedUp = (fpLiftMode == LiftMode::pid && fpLiftGoal > slowAbove) ||
                     ((fpLiftPending || fpLiftMode == LiftMode::hop) && fpHopThen > slowAbove);
     if (headedUp || lift > slowAbove) {
@@ -1065,10 +1158,14 @@ double clawGap(double routeX, double routeY) {
 
 // Drives a curve through a pin (node pinNode of the curve), picks it up on the way through without stopping,
 // then carries on along the curve into the goal with the lift going up, and lets go.
-// false = the 15 s ran out.
-bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY, double scoreHeight) {
+// pinSlowMs / scoreSlowMs / settleMs: the pin's slowdown, the goal's slowdown and the stop before letting go
+// (WAITS AND SLOWDOWNS). false = the 15 s ran out.
+bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY, double scoreHeight,
+                    int pinSlowMs, int scoreSlowMs, int settleMs) {
     Curve curve = makeCurve(nodes, false, FP_MAX_SPEED, 0.0);
     double grabAt = curve.nodeIndex[pinNode] * FP_SAMPLE_STEP;   // inches along the curve where the pin is in the claw
+    addSlowdown(curve, grabAt, pinSlowMs, FP_PICKUP_SLOW_SPEED);
+    addSlowdownAtEnd(curve, scoreSlowMs, FP_SCORE_SLOW_SPEED);
     bool grabbed = false;
     aimAt(AimKind::pin, pinX, pinY);
 
@@ -1098,10 +1195,11 @@ bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, do
     aimStop();
     if (end == MoveEnd::timeUp) return false;
 
-    // At the goal: let go
+    // At the goal: settle (if set), then let go
+    if (!waitMs(settleMs)) return false;
     note("at the goal: let go");
     clawOpen();
-    return waitMs(FP_SCORE_RELEASE_MS);
+    return waitMs(FP_ALLIANCE_RELEASE_MS);
 }
 
 // Backs away from the goal and swings the nose to a new heading (one backwards curve). The lift drops and the
@@ -1157,14 +1255,14 @@ void runFourPin(bool turned, bool mirrored) {
     Vec pin2Back = forwardOf(FP_PIN2_HEADING);
     const Node pin2Pose = node(FP_PIN2_TIP_X + pin2Back.x * (FP_INTAKE_REACH - FP_PIN2_EXTRA),
                                FP_PIN2_TIP_Y + pin2Back.y * (FP_INTAKE_REACH - FP_PIN2_EXTRA), FP_PIN2_HEADING);
+    const Node cupPose = clawOn(FP_CUP_X, FP_CUP_Y, FP_CUP_HEADING, FP_CLAW_REACH);
+    const Node neutralScore = clawOn(FP_NEUTRAL_X, FP_NEUTRAL_Y, FP_NEUTRAL_SCORE_HEADING, FP_CLAW_REACH + FP_NEUTRAL_SCORE_EXTRA);
+    const Node turn3 = node(FP_TURN3_X, FP_TURN3_Y, FP_TURN3_HEADING);
     const Node pin3Pose = clawOn(FP_PIN3_X, FP_PIN3_Y, FP_PIN3_HEADING, FP_CLAW_REACH + FP_PIN3_GRAB_EXTRA);
     const Node pin3Score = clawOn(FP_GOAL_X, FP_GOAL_Y, FP_PIN3_SCORE_HEADING, FP_CLAW_REACH + FP_PIN3_SCORE_EXTRA);
     const Node turn4 = node(FP_TURN4_X, FP_TURN4_Y, FP_TURN4_HEADING);
     const Node pin4Pose = clawOn(FP_PIN4_X, FP_PIN4_Y, FP_PIN4_HEADING, FP_CLAW_REACH + FP_PIN4_GRAB_EXTRA);
     const Node pin4Score = clawOn(FP_GOAL_X, FP_GOAL_Y, FP_PIN4_SCORE_HEADING, FP_CLAW_REACH + FP_PIN4_SCORE_EXTRA);
-    const Node turn5 = node(FP_TURN5_X, FP_TURN5_Y, FP_TURN5_HEADING);
-    const Node cup5Pose = clawOn(FP_CUP5_X, FP_CUP5_Y, FP_CUP5_HEADING, FP_CLAW_REACH);
-    const Node cup5Score = clawOn(FP_GOAL_X, FP_GOAL_Y, FP_CUP5_SCORE_HEADING, FP_CLAW_REACH + FP_CUP5_SCORE_EXTRA);
 
     // ---------------- Start: lift up and straight back down (the toggles drop onto the field toggle) ----------------
     fpLiftMode = LiftMode::direct;
@@ -1194,6 +1292,7 @@ void runFourPin(bool turned, bool mirrored) {
         start.heading = FP_START_HEADING;   // straight off the wall
         Curve curve = makeCurve({start, along(start, FP_START_STRAIGHT, 0, 6.0), along(preloadPose, -FP_GOAL_LEAD_IN, 8.0, 0), preloadPose},
                                 false, FP_MAX_SPEED, 0.0);
+        addSlowdownAtEnd(curve, FP_PRELOAD_SCORE_SLOW_MS, FP_SCORE_SLOW_SPEED);
         if (FP_USE_GOAL_TAG) aimAt(AimKind::goalTag, FP_GOAL_X, FP_GOAL_Y);
         MoveOptions options;
         options.tick = [&](double done, double left) {
@@ -1219,6 +1318,7 @@ void runFourPin(bool turned, bool mirrored) {
         end.tangentIn = 9.0;
         end.speed = FP_INTAKE_SPEED;
         Curve curve = makeCurve({start, clear, end}, true, FP_MAX_SPEED, 0.0);
+        addSlowdownAtEnd(curve, FP_CLUSTER_PIN_SLOW_MS, FP_PICKUP_SLOW_SPEED);
         MoveOptions options;
         options.tick = [&](double done, double left) {
             if (done >= 1.0) clawOff();                                    // claw motor off: it closes by itself
@@ -1236,47 +1336,26 @@ void runFourPin(bool turned, bool mirrored) {
         fpIntakeOffAtMs = pros::millis() + FP_INTAKE_KEEP_MS;
     }
 
-    // ---------------- 3. Around the small red pin, through pin 3, left into the goal ----------------
+    // ---------------- 3. Forward, curving down past the left of the neutral goal into the wall cup ----------------
+    // One curve from the cluster pin: straight away from the small red pin, swing left round the neutral goal, and
+    // into the cup and the wall with the claw spinning closed. The intake still has the cluster pin.
     {
-        Node start = hereNode();
-        std::vector<Node> nodes = {
-            start,
-            along(pin2Pose, FP_PIN2_STRAIGHT_OUT, 0, 7.0),
-            along(pin3Pose, -FP_PIN_LEAD_IN, 8.0, 0),
-            node(pin3Pose.x, pin3Pose.y, pin3Pose.heading, 0, 0, FP_GRAB_SPEED),
-            along(pin3Pose, FP_PIN_LEAD_OUT, 0, 7.0),
-            along(pin3Score, -FP_GOAL_LEAD_IN, 7.0, 0),
-            pin3Score,
-        };
-        if (!pickUpAndScore(nodes, 3, FP_PIN3_X, FP_PIN3_Y, -24.0, -24.0, getStackHeight(GOAL_ALLIANCE, FP_PIN3_STACK))) return;
-    }
-
-    // ---------------- 4. Back out, nose at pin 4, through pin 4, left into the goal ----------------
-    if (!backOutTo(FP_PIN3_BACK_OUT, turn4)) return;
-    {
+        Node end = cupPose;
+        end.speed = FP_WALL_SPEED;
         std::vector<Node> nodes = {
             hereNode(),
-            along(pin4Pose, -FP_PIN_LEAD_IN),
-            node(pin4Pose.x, pin4Pose.y, pin4Pose.heading, 0, 0, FP_GRAB_SPEED),
-            along(pin4Pose, FP_PIN_LEAD_OUT, 0, 8.0),
-            along(pin4Score, -FP_GOAL_LEAD_IN, 8.0, 0),
-            pin4Score,
+            along(pin2Pose, FP_PIN2_STRAIGHT_OUT, 0, FP_PIN2_SWING_TANGENT),
+            along(cupPose, -FP_CUP_LEAD_IN),
+            end,
         };
-        if (!pickUpAndScore(nodes, 2, FP_PIN4_X, FP_PIN4_Y, -48.0, -48.0, getStackHeight(GOAL_ALLIANCE, FP_PIN4_STACK))) return;
-    }
-
-    // ---------------- 5. Back out, nose at the wall cup, into the cup and the wall with the claw spinning ----------------
-    if (!backOutTo(FP_PIN4_BACK_OUT, turn5)) return;
-    {
-        Node end = cup5Pose;
-        end.speed = FP_WALL_SPEED;
-        Curve curve = makeCurve({hereNode(), along(cup5Pose, -5.0), end}, false, FP_MAX_SPEED, FP_WALL_SPEED);
+        Curve curve = makeCurve(nodes, false, FP_MAX_SPEED, FP_WALL_SPEED);
+        addSlowdownAtEnd(curve, FP_CUP_SLOW_MS, FP_PICKUP_SLOW_SPEED);
         MoveOptions options;
         options.brakeAtEnd = false;
         options.stallMs = 100;   // against the wall = there
         options.tick = [&](double done, double left) {
-            (void)done; (void)left;
-            clawClose();   // spinning closed the whole way in (not opened for this one)
+            (void)done;
+            if (left <= FP_CUP_CLAW_ON_DIST) clawClose();   // spinning closed the rest of the way in (not opened for the cup)
             liftDown();
 #ifdef RW_SIM_PROS
             // The simulator's wall only stops the middle of the robot, so a front corner would drive through it.
@@ -1303,23 +1382,35 @@ void runFourPin(bool turned, bool mirrored) {
             if (fpTimeUp) { stopChassis(pros::MotorBrake::brake); return; }
             pros::delay(10);
         }
+        stopChassis(pros::MotorBrake::brake);
+        if (!waitMs(FP_CUP_EXTRA_WAIT_MS)) return;   // a little longer on the cup, claw still squeezing
     }
 
-    // ---------------- Back off the wall with the lift going straight up to score, flip the pin into the cup on the way ----------------
+    // ---------------- 4. Back off the wall with the lift going up, flip the pin into the cup, swing round into the neutral goal ----------------
+    const double neutralLift = neutralHeight(FP_NEUTRAL_CUP_SPOT);
+    // Flip once the lift has climbed a little (never above the neutral height itself, or it would never flip)
+    const double flipAtLift = std::min(FP_CUP_FLIP_LIFT_DEG, neutralLift - FP_LIFT_READY_TOLERANCE);
     bool flipStarted = false;
-    const bool liftGoing = true;   // the lift heads for the scoring height right away (no waiting for the flip)
+    uint32_t flipStartMs = 0;
+    auto startFlip = [&]() {
+        if (flipStarted) return;
+        flipStarted = true;
+        flipStartMs = pros::millis();
+        note("flip the pin into the cup");
+        flipperUp();
+    };
     auto cupSequence = [&]() {
-        // Flip once the lift has climbed a little (the flip keeps going while the lift carries on up)
-        if (!flipStarted && fpLiftMode == LiftMode::pid && getDR4BPosition() >= FP_CUP_FLIP_LIFT_DEG) {
-            flipStarted = true;
-            note("flip the pin into the cup");
-            flipperUp();
-        }
+        if (fpLiftMode == LiftMode::pid && getDR4BPosition() >= flipAtLift) startFlip();
+    };
+    auto flipDone = [&]() {
+        return flipStarted && pros::millis() - flipStartMs >= static_cast<uint32_t>(FP_CUP_FLIP_MIN_MS);
     };
     {
+        // Straight off the wall, then the back swings left so the nose comes round to point at the neutral goal
         Node start = hereNode();
-        Curve curve = makeCurve({start, along(start, -FP_WALL_BACK_OUT), along(cup5Score, -FP_CUP5_SCORE_RUN)}, true, FP_MAX_SPEED, FP_CUSP_SPEED);
-        liftTo(getStackHeight(GOAL_ALLIANCE, FP_CUP5_STACK));
+        Curve curve = makeCurve({start, along(start, -FP_WALL_BACK_OUT), along(neutralScore, -FP_NEUTRAL_SCORE_RUN)},
+                                true, FP_MAX_SPEED, FP_CUSP_SPEED);
+        liftTo(neutralLift);
         MoveOptions options;
         options.brakeAtEnd = false;
         options.tick = [&](double done, double left) {
@@ -1328,33 +1419,68 @@ void runFourPin(bool turned, bool mirrored) {
             return true;
         };
         if (follow(curve, options) == MoveEnd::timeUp) return;
-        note("backed off the wall");
+        note("swung round to the neutral goal");
     }
-
-    // ---------------- Into the goal, flipper back just before, let go, lower. Lift limp before 15 s. ----------------
     {
-        Curve curve = makeCurve({hereNode(), along(cup5Score, -FP_GOAL_LEAD_IN), cup5Score}, false, FP_MAX_SPEED, 0.0);
-        if (FP_USE_GOAL_TAG) aimAt(AimKind::goalTag, FP_GOAL_X, FP_GOAL_Y);
+        Curve curve = makeCurve({hereNode(), along(neutralScore, -FP_GOAL_LEAD_IN), neutralScore}, false, FP_MAX_SPEED, 0.0);
+        addSlowdownAtEnd(curve, FP_NEUTRAL_SCORE_SLOW_MS, FP_SCORE_SLOW_SPEED);
+        if (FP_USE_GOAL_TAG) aimAt(AimKind::goalTag, FP_NEUTRAL_X, FP_NEUTRAL_Y);
         MoveOptions options;
         options.gateBeforeEnd = FP_SCORE_GATE_IN;
-        options.gateReady = [&]() { return liftGoing && liftReady() && !fpTipping; };
+        options.gateReady = [&]() { return liftReady() && flipDone() && !fpTipping; };
         options.gateEta = [&]() {
-            // The rest of the climb to the scoring height
-            double climb = getStackHeight(GOAL_ALLIANCE, FP_CUP5_STACK) - FP_LIFT_READY_TOLERANCE - std::max(getDR4BPosition(), 0.0);
-            return std::max(climb, 0.0) / FP_LIFT_UP_DPS;
+            // Whichever is later: the rest of the lift's climb, or the rest of the flip
+            double climb = neutralLift - FP_LIFT_READY_TOLERANCE - std::max(getDR4BPosition(), 0.0);
+            double flipLeftMs = flipStarted ? FP_CUP_FLIP_MIN_MS - static_cast<double>(pros::millis() - flipStartMs) : FP_CUP_FLIP_MIN_MS;
+            return std::max({std::max(climb, 0.0) / FP_LIFT_UP_DPS, flipLeftMs / 1000.0, 0.0});
         };
         options.tick = [&](double done, double left) {
             (void)done;
             cupSequence();
-            if (liftGoing && liftReady() && left <= FP_FLIPPER_BACK_BEFORE_IN) flipperDown();   // out of the way right before scoring
+            if (liftReady() && flipDone() && left <= FP_FLIPPER_BACK_BEFORE_IN) flipperDown();   // out of the way right before scoring
             return true;
         };
         if (follow(curve, options) == MoveEnd::timeUp) return;
-        note("at the goal: let go (last)");
+        note("at the neutral goal: let go");
         aimStop();
+        startFlip();   // (only if the lift never got to the flip height, e.g. after a tip)
+        while (!flipDone()) {
+            if (!waitMs(10)) return;
+        }
+        if (!waitMs(FP_NEUTRAL_SETTLE_MS)) return;
         flipperDown();
         clawOpen();
-        if (!waitMs(FP_SCORE_RELEASE_MS)) return;
+        if (!waitMs(FP_NEUTRAL_RELEASE_MS)) return;
+    }
+
+    // ---------------- 5. Back out with the nose swinging up-left, through pin 3, left into the alliance goal ----------------
+    if (!backOutTo(FP_NEUTRAL_BACK_OUT, turn3)) return;
+    {
+        std::vector<Node> nodes = {
+            hereNode(),
+            along(pin3Pose, -FP_PIN_LEAD_IN, 8.0, 0),
+            node(pin3Pose.x, pin3Pose.y, pin3Pose.heading, 0, 0, FP_GRAB_SPEED),
+            along(pin3Pose, FP_PIN_LEAD_OUT, 0, 7.0),
+            along(pin3Score, -FP_GOAL_LEAD_IN, 7.0, 0),
+            pin3Score,
+        };
+        if (!pickUpAndScore(nodes, 2, FP_PIN3_X, FP_PIN3_Y, -24.0, -24.0, allianceHeight(FP_ALLIANCE_FIELD_PIN3_SPOT),
+                            FP_PIN3_SLOW_MS, FP_PIN3_SCORE_SLOW_MS, FP_PIN3_SETTLE_MS)) return;
+    }
+
+    // ---------------- 6. Back out, nose at pin 4, through pin 4, left into the alliance goal, lower ----------------
+    if (!backOutTo(FP_PIN3_BACK_OUT, turn4)) return;
+    {
+        std::vector<Node> nodes = {
+            hereNode(),
+            along(pin4Pose, -FP_PIN_LEAD_IN),
+            node(pin4Pose.x, pin4Pose.y, pin4Pose.heading, 0, 0, FP_GRAB_SPEED),
+            along(pin4Pose, FP_PIN_LEAD_OUT, 0, 8.0),
+            along(pin4Score, -FP_GOAL_LEAD_IN, 8.0, 0),
+            pin4Score,
+        };
+        if (!pickUpAndScore(nodes, 2, FP_PIN4_X, FP_PIN4_Y, -48.0, -48.0, allianceHeight(FP_ALLIANCE_FIELD_PIN4_SPOT),
+                            FP_PIN4_SLOW_MS, FP_PIN4_SCORE_SLOW_MS, FP_PIN4_SETTLE_MS)) return;
         liftDown();   // no backing up: just lower
         while (!liftIsDown()) {
             if (!waitMs(10)) return;   // out of time: the lift is already limp and falls by itself

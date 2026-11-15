@@ -8,7 +8,7 @@
 extern bool use_mcl;
 extern bool use_distance_resets;
 
-// Tuning / test routines (src/rw-autons.cpp), picked on the auton selector
+// Tuning / test routines (src/rw-autons.cpp), called from runAutonomous() in src/rw-user.cpp
 void exampleAuton();      // "Tuning Test": drive and turn PID
 void exampleAuton2();     // "Odom Test": drives a few points and back to the start
 void odomCheckAuton();    // "Odom Check": nothing moves, push the robot and read X / Y / heading
@@ -16,6 +16,7 @@ void squareTestAuton();   // "Square Test": 24" square back to the start
 void sensorCheckAuton();  // "Sensor Check": distance sensor readings, resets and MCL from the skills start
 void imuScaleAuton();     // "IMU Scale": spin the robot 10 turns by hand to measure imu_scale
 void feedforwardAuton();  // "Feedforward": measures drive_kS / kV / kA for profiled moves and path following
+void aiVisionTuningAuton();  // "AI Vision Tuning": white balance, live pin / cup / stack readout + rumble on the controller (src/ai-vision-tuning.cpp)
 
 // Called from src/main.cpp (src/rw-user.cpp)
 void runPreAutonomous();

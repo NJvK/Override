@@ -670,7 +670,7 @@ bin/rw-user.cpp.o: src/rw-user.cpp include/robot.hpp include/main.h \
  include/rw/path-following.h include/rw/path.h \
  include/rw/auton-selector.h include/rw/driver-control.h \
  include/rw/drive-log.h include/rw/pid.h include/rw/utils.h \
- include/rw/hardware.h include/fourpin.hpp
+ include/fourpin.hpp
 include/robot.hpp:
 include/main.h:
 include/api.h:
@@ -1424,5 +1424,4 @@ include/rw/driver-control.h:
 include/rw/drive-log.h:
 include/rw/pid.h:
 include/rw/utils.h:
-include/rw/hardware.h:
 include/fourpin.hpp:
