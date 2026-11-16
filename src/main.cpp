@@ -84,12 +84,14 @@ constexpr int CLAW_HOLD_VOLTAGE = 2000;
 
 // --- Alliance goal heights (degrees), one per stack position 1-5 (getStackHeight() in the autons) ---
 constexpr int NUM_STACK_HEIGHTS = 5;
+// Measured on the rebuilt robot. The sensor read backwards (and past 360 for the top two): 200, 120, 45, 325, 198 read
+// off the sensor = 360 - reading (+ 360 once it wrapped) = the heights below.
 constexpr double ALLIANCE_HEIGHTS[NUM_STACK_HEIGHTS] = {
-    167.95,   // pin/cup 1
-    256.11,   // pin/cup 2
-    368.52,   // pin/cup 3
-    490.69,   // pin/cup 4
-    642.66    // pin/cup 5
+    160.0,    // pin/cup 1   (read 200)
+    240.0,    // pin/cup 2   (read 120)
+    315.0,    // pin/cup 3   (read 45)
+    395.0,    // pin/cup 4   (read 325: wrapped, 35 + 360)
+    522.0     // pin/cup 5   (read 198: wrapped, 162 + 360)
 };
 // --- Lift motion (how the PID travels to a height) ---
 // Voltage cap (mV, 12000 = full power) while the lift is travelling to a new height.

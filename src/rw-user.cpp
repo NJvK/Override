@@ -1,11 +1,14 @@
 #include "robot.hpp"   // rw-config.h + the robot's devices and lift functions
 #include "fourpin.hpp"      // the 4-pin qual auton (src/fourpin.cpp)
+#include "skills.hpp"       // the 1-minute skills run (src/skills.cpp)
 
 // Modify autonomous, driver, or pre-auton code below. src/main.cpp calls these.
 
 // There's no auton selector: autonomous runs whatever is called here. Uncomment exactly ONE line.
-// (Everything is commented out right now, so autonomous does nothing until you pick one.)
 void runAutonomous() {
+  // ---- Skills (src/skills.cpp): 1 minute, back on the LEFT wall toggle (middle of the left wall), facing right ----
+  skillsAuton();
+
   // ---- 4-pin qual auton (src/fourpin.cpp): one route, four starts ----
   // fourPinRedBottom();    // back on the bottom wall toggle (red)
   // fourPinBlueTop();      // the same route turned 180 degrees, back on the top wall toggle (blue)

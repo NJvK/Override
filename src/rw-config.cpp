@@ -44,7 +44,7 @@ pros::Distance back_sensor(16);
 
 // Distance between the middles of the left and right wheels of the drive (in inches)
 // (mecanum: plus the distance between the front and back wheels, see the docs: Guide > Drive Types)
-double distance_between_wheels = 12.625;   // DRIVE_TRACK_WIDTH in main.cpp (12 5/8", measured)
+double distance_between_wheels = 12.6;     // measured: middle of the left wheels to the middle of the right wheels (wheelbase 10.0)
 
 // motor to wheel gear ratio * wheel diameter (in inches) * pi
 // (X-drive: also * 0.707, see the docs: Guide > Drive Types)
@@ -78,11 +78,11 @@ bool using_vertical_tracker = true;     // vertical tracking wheel on port 14
 // IGNORE THESE IF YOU ARE NOT USING TRACKING WHEELS
 // These comments are in the perspective of a top down view of the robot when the robot is facing vertical
 // Vertical distance from the center of the bot to the horizontal tracking wheel (in inches, positive is when the wheel is behind the center)
-// main.cpp ODOM_HORIZONTAL_OFFSET = -2.25 (LemLib: behind = negative). RW: behind = POSITIVE, so +2.25
-double horizontal_tracker_dist_from_center = 3.75;
+// Measured: the horizontal wheel is 1.25" behind the center (and 1" to the side, which doesn't matter for it)
+double horizontal_tracker_dist_from_center = 1.25;
 // Horizontal distance from the center of the bot to the vertical tracking wheel (in inches, positive is when the wheel is to the right of the center)
-// main.cpp ODOM_VERTICAL_OFFSET = -0.1 (left of center = negative in both LemLib and RW)
-double vertical_tracker_dist_from_center = -0.4;
+// Measured: the vertical wheel is 0.5" left of the center (and 3.25" forward, which doesn't matter for it)
+double vertical_tracker_dist_from_center = -0.5;
 double horizontal_tracker_diameter = 2.00836820084; // ODOM_HORIZONTAL_DIAMETER (tuned with the push test)
 double vertical_tracker_diameter = 2.01258746176;   // ODOM_VERTICAL_DIAMETER (tuned with the 96" push test)
 
@@ -123,17 +123,19 @@ bool use_distance_resets = true;  // one-shot resets the autons do while stopped
 // double front_sensor_offsetY = 6.5;
 // For the X offset, a negative value indicates that the sensor is located on the left side of the robot, while a positive value indicates that it is on the right side.
 
-double front_sensor_offsetX = 5.91;
-double front_sensor_offsetY = 6.85;
+// Measured from the tracking center (the middle of the drive wheels). Heights off the floor in the comments: the
+// field-aware MCL assumes a beam below a goal's top can be blocked by it.
+double front_sensor_offsetX = 5.5;    // 4.7" high
+double front_sensor_offsetY = 6.5;
 
-double left_sensor_offsetX = -7.35;
-double left_sensor_offsetY = 4.0;
+double left_sensor_offsetX = -6.9;    // 8.8" high
+double left_sensor_offsetY = 1.8;
 
-double right_sensor_offsetX = 7.8;
-double right_sensor_offsetY = 3.8;
+double right_sensor_offsetX = 6.9;    // 7.9" high
+double right_sensor_offsetY = 3.7;
 
-double back_sensor_offsetX = 6.2;
-double back_sensor_offsetY = -4.4;   // reads 3.9" with the back flush on a wall: 8.3 (center to back, measured) - 3.9
+double back_sensor_offsetX = 6.5;     // 3.4" high
+double back_sensor_offsetY = -7.0;
 
 // ============================================================================
 // ADVANCED TUNING (OPTIONAL)

@@ -87,13 +87,19 @@ double getStackHeight(GoalType goal, int count);
 // Autonomous: the 4-pin qual auton (src/fourpin.cpp, declared in include/fourpin.hpp).
 // Call it from runAutonomous() in src/rw-user.cpp.
 
-// AI Vision sensor behind the claw (pins / cups; it does not see AprilTags). The 4-pin auton aims with it and the brain screen
-// shows what it sees.
+// CLAW camera: the AI Vision sensor in the middle of the claw, behind the red gears (pins / cups only; the gears block the
+// bottom third of its picture). The autons line pins up with the claw with it; the brain screen shows what it sees.
 constexpr int AI_VISION_PORT = 5;
 // Pins / cups the model is less sure about than this are ignored (the 4-pin auton's aiming, and greyed out on the
 // brain screen). 0 = use everything. Run the "AI Vision Tuning" auton (aiVisionTuningAuton) to see the scores the
 // real pins get in your lighting, then set this a bit under them to cut out false detections.
 constexpr int AI_VISION_MIN_SCORE = 0;
+// FIELD camera: the second AI Vision sensor, low at the front-right corner of the chassis, turned a little inward. It sees
+// pins / cups and the AprilTags on the goals: the autons line up every goal approach on the tags and find pins with it from
+// further out than the claw camera (include/auton-core.hpp, AI VISION block). The brain screen shows what it sees.
+constexpr int GOAL_VISION_PORT = 21;
+constexpr double GOAL_TAG_SIZE_IN = 2.0;         // the tag's black square, edge to edge (inches): about 2". The distance the
+                                                 // brain screen shows scales with it, so check it against a tape measure
 
 // Brain screen (src/brain-screen.cpp): X / Y / heading, MCL, and what the AI Vision sensor sees. Started by
 // runPreAutonomous(). It stays off during autonomous; after an auton, tap the screen to bring it back (so a tuning
