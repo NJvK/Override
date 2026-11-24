@@ -34,7 +34,7 @@ constexpr int FIELD_HEAD_Y = 76, FIELD_LIST_Y = 98, FIELD_ROWS = 4;   // field c
 constexpr int CLAW_HEAD_Y = 178, CLAW_LIST_Y = 200, CLAW_ROWS = 2;    // claw camera: heading line + 2 rows
 constexpr double CAM_WIDTH_PX = 320.0;  // the AI Vision picture is 320 x 240
 constexpr double CAM_FOV_DEG = 74.0;    // side to side (same as FP_CAM_FOV_DEG in include/auton-core.hpp)
-constexpr int CLAW_CAM_BLOCKED_FROM_PX = 160;   // the claw camera's picture is gears from this row down (= FP_CLAW_CAM_BLOCKED_FROM_PX)
+constexpr int CLAW_CAM_MAX_CENTER_Y = 160;   // a claw camera box centered this low is the gears / claw (= FP_CLAW_CAM_MAX_CENTER_Y)
 constexpr int MAX_CLASSES = 16;
 
 constexpr uint32_t BLACK = 0x000000;
@@ -126,7 +126,7 @@ void drawCamera(pros::AIVision& camera, int port, const char* name, bool field, 
         text[0] = '\0';
         if (seen.type & pros::E_AIVISION_DETECTED_OBJECT) {
             const auto& e = seen.object.element;
-            const bool gear = !field && e.yoffset >= CLAW_CAM_BLOCKED_FROM_PX;   // starts in the gears: ignored by the autons
+            const bool gear = !field && e.yoffset + e.height / 2 >= CLAW_CAM_MAX_CENTER_Y;   // gears / claw: ignored by the autos
             if (e.score < AI_VISION_MIN_SCORE || gear) color = GREY;
             const char* label = (seen.id < classCount) ? classNames[seen.id] : "object";
             double center = e.xoffset + e.width / 2.0;

@@ -1,4 +1,6 @@
 #include "robot.hpp"
+#include "auton-select.hpp"   // the auton selector on the controller
+#include "pad.hpp"            // the controller screen (one task writes it: src/pad.cpp)
 
 // Controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
@@ -14,8 +16,8 @@ pros::MotorGroup& rightMotors = right_chassis;
 // RW-Template runs the drivetrain now. Everything that was in the LemLib tuning block lives in
 // src/rw-config.cpp: tracking wheel ports / sizes / offsets, track width, drive and turn PID, IMU scale,
 // and the new Monte Carlo localization (MCL) + distance sensor settings.
-// TUNING_TEST is gone: the tests (PID test, odometry check, square test, IMU scale, sensor check)
-// are called from runAutonomous() in src/rw-user.cpp, like any auton (there's no auton selector).
+// TUNING_TEST is gone: the tuning tools (src/tuning.cpp, src/ai-vision-tuning.cpp) are picked on the controller
+// like the autons (LEFT / RIGHT, src/auton-select.cpp).
 // =====================================================================
 
 // IMU: the same sensor RW uses (inertial_sensor, port set in src/rw-config.cpp).
@@ -33,7 +35,7 @@ constexpr float DRIVE_CURVE_GAIN = 1.019;
 
 // ---------------- Controller readout ----------------
 // The old brain screen readouts are on the CONTROLLER screen, lines 2 and 3, during driver control
-// (in auton the tuning tests print their own numbers there).
+// (line 1 keeps what the auton / selector left there; in auton the routes and tuning tools use all three).
 //   0 = lift:         "L<lift> H<hold> C<claw rpm>"
 //   2 = counters:      "Pin <pin lifts> Zero <zeroes>" / "Roll <IMU roll>"
 //   3 = distance sensors, inches (-- = sees nothing): "F<front> R<right>" / "B<back> L<left>"
@@ -557,7 +559,7 @@ double getStackHeight(GoalType goal, int count) {
 // Initialize
 void initialize() {
     // RW: calibrates the IMU (keep the robot still ~2 s), starts odometry (+ MCL if it's on in
-    // src/rw-config.cpp). Replaces chassis.calibrate(). (No auton selector: see runAutonomous() in src/rw-user.cpp.)
+    // src/rw-config.cpp). Replaces chassis.calibrate(). Also starts the controller screen and the auton selector.
     runPreAutonomous();
 
     // Make the lift rotation sensor update every 5 ms (default is 20 ms) so the PID
@@ -582,18 +584,17 @@ void initialize() {
         runDR4BPID();
     });
 
-    // Readouts on the controller screen (see CONTROLLER_READOUT). One controller print gets through
-    // every 50 ms, so lines 2 and 3 take turns.
-    // Only during driver control: in auton the tuning tests print their own numbers there.
+    // Readouts on the controller screen (see CONTROLLER_READOUT), lines 2 and 3, through the controller screen task
+    // (src/pad.cpp). Only during driver control: disabled, the selector has the screen; in auton the route / tool.
     static pros::Task screenTask([]() {
         bool secondLine = false;
         while (true) {
-            if (pros::competition::is_disabled() || pros::competition::is_autonomous()) {
+            if (!driverScreenOn()) {
                 pros::delay(100);
                 continue;
             }
             if (CONTROLLER_READOUT == 3) {
-                // Raw readings times distance_sensor_scale, same numbers as the "Sensor Check" auton
+                // Raw readings times distance_sensor_scale, same numbers as the "Sensors + MCL" tool
                 auto inches = [](pros::Distance& sensor) {
                     int32_t mm = sensor.get();
                     return (mm > 0 && mm < 9999) ? mm / 25.4 * distance_sensor_scale : -1.0;
@@ -604,15 +605,15 @@ void initialize() {
                 double inchesA = inches(a), inchesB = inches(b);
                 if (inchesA < 0) snprintf(textA, sizeof(textA), "--"); else snprintf(textA, sizeof(textA), "%.1f", inchesA);
                 if (inchesB < 0) snprintf(textB, sizeof(textB), "--"); else snprintf(textB, sizeof(textB), "%.1f", inchesB);
-                controller.print(secondLine ? 2 : 1, 0, "%c%-7s %c%-7s   ", secondLine ? 'B' : 'F', textA, secondLine ? 'L' : 'R', textB);
+                pad::line(secondLine ? 2 : 1, "%c%-7s %c%-7s", secondLine ? 'B' : 'F', textA, secondLine ? 'L' : 'R', textB);
             } else if (CONTROLLER_READOUT == 2) {
                 if (!secondLine) {
-                    controller.print(1, 0, "Pin %-3d Zero %-3d    ", pinLiftCount, liftZeroCount);
+                    pad::line(1, "Pin %-3d Zero %-3d", pinLiftCount, liftZeroCount);
                 } else {
-                    controller.print(2, 0, "Roll %-6.1f         ", imu.get_roll());
+                    pad::line(2, "Roll %-6.1f", imu.get_roll());
                 }
             } else {
-                controller.print(1, 0, "L%-4.0f H%-4.0f C%-4.0f", getDR4BPosition(), dr4bTarget, claw.get_actual_velocity());
+                pad::line(1, "L%-4.0f H%-4.0f C%-4.0f", getDR4BPosition(), dr4bTarget, claw.get_actual_velocity());
             }
             secondLine = !secondLine;
             pros::delay(100);
@@ -620,22 +621,22 @@ void initialize() {
     });
 }
 
-// Field control connected, waiting for auton to start (nothing to do)
+// Field control connected, waiting for auton to start: the selector task (src/auton-select.cpp) has the controller
 void competition_initialize() {}
 
-// Disabled (before auton, and between auton and driver): nothing to do
+// Disabled (before auton, and between auton and driver): the selector task picks with LEFT / RIGHT
 void disabled() {}
 
-// Autonomous (only runs when field control / a competition switch starts autonomous)
+// Autonomous: field control / a competition switch starts it (or a Timed Run)
 void autonomous() {
     dr4bSlewDown = DR4B_AUTON_SLEW_DOWN;   // lift lowers a little slower in auton
 
-    // Runs whichever auton is uncommented in runAutonomous() (src/rw-user.cpp).
+    // Runs what's picked on the controller (runAutonomous() in src/rw-user.cpp)
     runAutonomous();
 }
 
-// Driver control
-void opcontrol() {
+// Puts the robot back in driver-control shape after an auton: at the start of driver control, and after a bench run
+static void driverSetup() {
     // Lift PID back on, first thing. The qual autons end with the lift PID off and the lift on coast (so a pin that's
     // almost on the goal keeps falling onto it after auton ends); this turns the PID back on and holds the lift
     // wherever it ended up. Both lift motors on coast (the PID does the holding, same as before).
@@ -655,6 +656,13 @@ void opcontrol() {
     rightMotors.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     // Flipper on coast, so when it's off it isn't held (holding against its stop overheats it)
     flipper.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+}
+
+// Driver control
+void opcontrol() {
+    // Driver control owns controller lines 1 and 2 from here (the selector only works while disabled)
+    driverStarting();
+    driverSetup();
 
     // Claw keeps spinning forward after R1 until R2 is used
     bool clawHolding = false;
@@ -695,6 +703,26 @@ void opcontrol() {
     bool tipLiftDone = false;
 
     while (true) {
+
+        // Bench mode (nothing connected): Y runs the auton / tool picked with LEFT / RIGHT (src/auton-select.cpp)
+        if (benchRunWanted()) {
+            driverArcadeDrive(0, 0);
+            claw.move_voltage(0);
+            intake.move_voltage(0);
+            flipper.move_voltage(0);
+            autonomous();
+            benchFinished();
+            driverSetup();
+            controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B);   // B (ends a tool) isn't an intake press
+            clawHolding = false;
+            intakeDirection = 0;
+            flipperReturning = false;
+            pinLiftActive = false;
+            clawSlow = false;
+            clawSpunUp = false;
+            clawStallLatched = false;
+            continue;
+        }
 
         // Drive
         int leftY = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
@@ -975,7 +1003,7 @@ void opcontrol() {
                         DR4B.move_voltage(PIN_LIFT_VOLTAGE);   // full power, no ramp-up (was move_velocity(PIN_LIFT_SPEED))
                     }
 
-                    controller.rumble(PIN_LIFT_RUMBLE);   // grab detected
+                    pad::rumble(PIN_LIFT_RUMBLE);   // grab detected (through the controller screen task)
                 }
             } else {
                 clawSlow = false;

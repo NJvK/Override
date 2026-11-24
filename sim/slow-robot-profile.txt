@@ -1,0 +1,11 @@
+# A deliberately slow, slippy drive for testing the skills time guard (not a fitted profile of the real robot)
+kS = 0.6
+kV = 0.215
+kA = 0.045
+max_accel = 140
+traction_accel = 160
+brake_decel = 250
+coast_decel = 60
+tread_slip = 0.97
+turn_scrub = 0.93
+lateral_skid = 0.02

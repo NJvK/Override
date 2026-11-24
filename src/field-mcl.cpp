@@ -33,6 +33,7 @@ constexpr double MCL_CORNER_MARGIN = 6.0;
 // 1-2" (it was right outside auton and off in auton). Between corrections it keeps following odometry.
 constexpr double MCL_MAX_SPEED_IPS = 20.0;
 constexpr double MCL_MAX_TURN_DPS = 90.0;
+volatile bool mcl_paused = false;      // pauseFieldMcl(): follows odometry, corrects nothing
 constexpr double BEAM_SPREAD = 0.21;   // tan(12 deg): how much wider the beam gets per inch it travels
 constexpr double BEAM_SPARE = 1.0;     // extra room around each element
 
@@ -160,7 +161,7 @@ void fieldMclThread() {
             }
 
             // Only weigh after moving a little, and only while moving slowly (MCL_MAX_SPEED_IPS / MCL_MAX_TURN_DPS)
-            if (count > 0 && moved_since_correct > 0.25 && odom_speed_ips < MCL_MAX_SPEED_IPS
+            if (!mcl_paused && count > 0 && moved_since_correct > 0.25 && odom_speed_ips < MCL_MAX_SPEED_IPS
                 && odom_turn_rate_dps < MCL_MAX_TURN_DPS) {
                 mclCorrect(heading_then, readings, count, field_half_size, odom_speed_ips * 0.01, shift_x, shift_y);
                 moved_since_correct = 0;
@@ -168,7 +169,7 @@ void fieldMclThread() {
             double spread_x = 0, spread_y = 0;
             mclEstimate(mcl_x, mcl_y, spread_x, spread_y);
             mcl_spread = std::fmax(spread_x, spread_y);
-            mclNudge(x_pos, y_pos, mcl_x, mcl_y, spread_x, spread_y);
+            if (!mcl_paused) mclNudge(x_pos, y_pos, mcl_x, mcl_y, spread_x, spread_y);
             mcl_cycle_msec = 0.8 * mcl_cycle_msec + 0.2 * (hw::timeMicros() - cycle_start) / 1000.0;
         }
 
@@ -250,6 +251,11 @@ int fieldAwareReset(double maxJump) {
 
 void startFieldMcl() {
     hw::startThread(fieldMclThread);
+}
+
+void pauseFieldMcl(bool paused) {
+    if (!paused && mcl_paused) mcl_recenter = true;   // correcting again: the particles start over from here
+    mcl_paused = paused;
 }
 
 void fieldMclPinPickedUp(double x, double y) {

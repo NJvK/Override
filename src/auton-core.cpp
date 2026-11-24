@@ -6,6 +6,7 @@
 // the top of fourpin.cpp; it moved here so both routes drive the same way.
 // =====================================================================
 #include "auton-core.hpp"
+#include "pad.hpp"   // the controller screen
 
 #include <algorithm>
 #include <cmath>
@@ -95,13 +96,29 @@ namespace {
 const char* fpRouteName = "auton";
 uint32_t fpStartMs = 0;
 int fpLimitMs = 15000;
+int fpEndReserveMs = FP_COAST_BEFORE_END_MS;   // everything stops this long before the limit
 bool fpTimeUp = false;
 }
 int elapsed() { return static_cast<int>(pros::millis() - fpStartMs); }
+int timeLeft() { return fpLimitMs - elapsed(); }
 bool timeUp() { return fpTimeUp; }
+void setEndReserve(int ms) { fpEndReserveMs = ms; }
+namespace {
+bool fpStatusOnPad = false;   // the route's time / pose / last step on the controller (coreStart turns it on;
+                              // the tuning tools turn it off again)
+uint32_t fpStatusLastMs = 0;
+double heading360() { return std::fmod(std::fmod(getInertialHeading(), 360.0) + 360.0, 360.0); }
+// Controller lines 0 and 1: route + time, and the pose
+void statusToPad() {
+    pad::line(0, "%-10.10s %5.1fs", fpRouteName, elapsed() / 1000.0);
+    pad::line(1, "X%.1f Y%.1f H%.0f", x_pos, y_pos, heading360());
+}
+}  // namespace
+void showStatusOnController(bool on) { fpStatusOnPad = on; }
 void note(const char* what) {
     std::printf("%s %5.2f s  %-28s x %6.1f  y %6.1f  heading %5.0f  lift %4.0f\n", fpRouteName, elapsed() / 1000.0, what, x_pos, y_pos,
-                std::fmod(std::fmod(getInertialHeading(), 360.0) + 360.0, 360.0), getDR4BPosition());
+                heading360(), getDR4BPosition());
+    if (fpStatusOnPad) pad::line(2, "%s", what);   // controller line 2: the last step
 }
 
 // =====================================================================
@@ -120,9 +137,22 @@ uint32_t fpLiftPendingAtMs = 0;
 double fpHopThen = -1.0;          // height to go to after the hop (-1 = stay at the hop height)
 double fpHopGoal = 0.0;
 uint32_t fpHopStartMs = 0;
+// Tip guard (the checks are in service()). While the robot is tipping the lift stays down whatever the route asks
+// for; what the route asked for last is remembered and done once it's level again.
+bool fpTipping = false;
+int fpTipTicks = 0;
+double fpTipRestoreGoal = 0.0;    // height to go back to when it's level again...
+bool fpTipRestoreDown = false;    // ...unless the route has sent the lift down since (it let go and is driving away)
 }
 
 void liftTo(double height) {
+    if (fpTipping) {
+        // Tipping: not now. It goes to this height when the robot is level again.
+        fpLiftPending = false;
+        fpTipRestoreGoal = height;
+        fpTipRestoreDown = false;
+        return;
+    }
     fpLiftPending = false;
     fpLiftPress = false;
     fpLiftMode = LiftMode::pid;
@@ -169,8 +199,14 @@ void endHop() {
     dr4bManualMode = false;
 }
 }
+void liftAfterHop(double height) {
+    if (fpLiftPending || fpLiftMode == LiftMode::hop) fpHopThen = height;   // the hop carries on up to it
+    else liftTo(height);
+}
+double liftSeconds(double height) { return FP_LIFT_START_S + std::max(height, 0.0) / FP_LIFT_UP_DPS; }
 void liftDown() {
     fpLiftPending = false;
+    if (fpTipping) fpTipRestoreDown = true;   // the route wants it down: it stays down when the robot is level again
     if (fpLiftMode == LiftMode::ground) return;
     fpLiftMode = LiftMode::ground;
     fpGroundStartMs = pros::millis();
@@ -234,6 +270,10 @@ void clawClose() { clawSet(ClawMode::closing); }
 void clawCloseAgain() { fpClawMode = ClawMode::closing; fpClawSinceMs = pros::millis(); }
 void clawOff() { clawSet(ClawMode::off); }
 bool clawHolding() { return fpClawMode == ClawMode::closing || fpClawMode == ClawMode::hold; }
+// The claw camera is only read with the claw open (FP_CLAW_CAM_OPEN_MS): closed, its arms fill the picture
+static bool clawOpenForCamera() {
+    return fpClawMode == ClawMode::opening && pros::millis() - fpClawSinceMs >= static_cast<uint32_t>(FP_CLAW_CAM_OPEN_MS);
+}
 
 // =====================================================================
 //   FLIPPER + INTAKE
@@ -272,11 +312,6 @@ void intakeOff() { fpIntakeOn = false; }
 // =====================================================================
 //   TIP GUARD
 // =====================================================================
-namespace {
-bool fpTipping = false;
-int fpTipTicks = 0;
-double fpTipRestoreGoal = 0.0;
-}
 bool tipping() { return fpTipping; }
 
 // =====================================================================
@@ -289,9 +324,33 @@ Vec fpAimSpot = {0, 0};      // where the pin / goal should be (field)
 Vec fpAimShift = {0, 0};     // current nudge (field)
 uint32_t fpAimLastMs = 0;
 int fpAimTagId = -1;         // goal tag aiming: the tag it's looking for (-1 = any)
+double fpAimWindow = 0.0;    // this aim only trusts a sighting within this many inches sideways (0 = the usual window)
 int fpAimSightings = 0;      // camera frames that found it during this aim (for the terminal log)
-// Pixels of focal length: how big something looks = FOCAL * its size / its distance
+/// Pixels of focal length: how far off-center something looks = FOCAL * tan(its angle)
 const double FP_CAM_FOCAL_PX = (FP_CAM_WIDTH_PX / 2.0) / std::tan(rad(FP_CAM_FOV_DEG / 2.0));
+uint32_t fpAimSeenMs = 0;    // when a camera last found what's being aimed at
+
+// Where the robot was over the last 0.3 s (service() adds one every 10 ms). A camera's picture is FP_CAM_LATENCY_MS
+// old, so what it shows is compared with where the robot was THEN, not where it is now.
+struct PastPose { uint32_t ms; double x, y, heading; };
+constexpr int FP_PAST_COUNT = 32;
+PastPose fpPast[FP_PAST_COUNT];
+int fpPastNext = 0;
+int fpPastFilled = 0;
+void rememberPose() {
+    fpPast[fpPastNext] = {pros::millis(), x_pos, y_pos, getInertialHeading()};
+    fpPastNext = (fpPastNext + 1) % FP_PAST_COUNT;
+    if (fpPastFilled < FP_PAST_COUNT) fpPastFilled++;
+}
+PastPose poseAgo(int ms) {
+    PastPose best = {pros::millis(), x_pos, y_pos, getInertialHeading()};
+    const uint32_t want = best.ms - static_cast<uint32_t>(ms);
+    for (int k = 1; k <= fpPastFilled; k++) {   // newest first: stops at the first one that old
+        best = fpPast[(fpPastNext - k + FP_PAST_COUNT) % FP_PAST_COUNT];
+        if (best.ms <= want) break;
+    }
+    return best;
+}
 
 // The two cameras
 enum class Cam { claw, field };
@@ -304,40 +363,31 @@ pros::AIVision& camera(Cam cam) {
 #endif
 double camYaw(Cam cam) { return cam == Cam::claw ? FP_PIN_CAM_YAW : FP_GOAL_CAM_YAW; }
 
-// Where a camera's lens is on the field right now
-Vec cameraSpot(Cam cam, double heading) {
-    Vec f = forwardOf(heading), r = rightOf(heading);
+// Where a camera's lens was on the field with the robot at `at`
+Vec cameraSpot(Cam cam, const PastPose& at) {
+    Vec f = forwardOf(at.heading), r = rightOf(at.heading);
     if (cam == Cam::field) {
-        return {x_pos + f.x * FP_GOAL_CAM_FORWARD + r.x * FP_GOAL_CAM_RIGHT, y_pos + f.y * FP_GOAL_CAM_FORWARD + r.y * FP_GOAL_CAM_RIGHT};
+        return {at.x + f.x * FP_GOAL_CAM_FORWARD + r.x * FP_GOAL_CAM_RIGHT, at.y + f.y * FP_GOAL_CAM_FORWARD + r.y * FP_GOAL_CAM_RIGHT};
     }
-    return {x_pos + f.x * FP_PIN_CAM_FORWARD, y_pos + f.y * FP_PIN_CAM_FORWARD};
+    return {at.x + f.x * FP_PIN_CAM_FORWARD, at.y + f.y * FP_PIN_CAM_FORWARD};
 }
 
-// Where a goal tag seen at (bearing, range) from the camera puts the goal's CENTER on the field: through the tag
-// and FP_GOAL_TAG_TO_CENTER further in
-Vec goalFromTag(const Vec& cam, double heading, double bearing, double range) {
-    Vec ray = forwardOf(heading + bearing);
-    double reach = range + FP_GOAL_TAG_TO_CENTER;
-    return {cam.x + ray.x * reach, cam.y + ray.y * reach};
-}
-
-// What one camera sees of the thing it should be looking at.
-//   Pins: the detection closest to expectedBearing (within FP_AIM_WINDOW_DEG). range = 0 (direction only).
-//   Goal tags: the tag that puts the goal closest to where it should be (within FP_GOAL_TAG_WINDOW_IN).
-//   bearing: degrees right of the ROBOT's straight ahead (the camera's own yaw is already added in)
-//   range:   inches from the camera lens to the tag, from how big it looks (tags only)
+// What one camera sees of the thing being aimed at, as inches SIDEWAYS: how far to the right of where it should be
+// it is, looking from the camera (+ = further right than odometry expects).
+//   then      where the robot was when the picture was taken
+//   spot      where the camera's lens was then
+//   expected  the bearing the thing should have from the camera (degrees right of the ROBOT's straight ahead)
+//   dist      inches from the camera to where it should be
+// Pickups: CUP detections only (isCupClass), within FP_PIN_WINDOW_IN of where the cup should be. Exactly one cup there
+// (boxes within FP_AIM_SAME_IN of each other are one cup); none, or two that disagree = not sure, nothing this frame.
+// Goal tags: the tag with the right id that faces the camera most squarely (FP_GOAL_TAG_MIN_SQUARENESS), within
+// FP_GOAL_TAG_WINDOW_IN. Only its direction is used, never its size (see the header).
 // false = nothing believable in view.
-bool cameraSighting(Cam cam, AimKind kind, double expectedBearing, double& bearing, double& range) {
-    range = 0.0;
+bool cameraSighting(Cam cam, AimKind kind, const PastPose& then, const Vec& spot, double expected, double dist, double& sideways) {
     const bool tags = kind == AimKind::goalTag;
-    const double heading = getInertialHeading();
-    const Vec spot = cameraSpot(cam, heading);
     const double yaw = camYaw(cam);
-    // How far a tag sighting puts the goal from where it should be
-    auto goalError = [&](double seenBearing, double seenRange) {
-        Vec goal = goalFromTag(spot, heading, seenBearing, seenRange);
-        return std::hypot(goal.x - fpAimSpot.x, goal.y - fpAimSpot.y);
-    };
+    const double window = fpAimWindow > 0.0 ? fpAimWindow : (tags ? FP_GOAL_TAG_WINDOW_IN : FP_PIN_WINDOW_IN);
+    const double reach = tags ? std::max(dist - FP_GOAL_TAG_TO_CENTER, 1.0) : dist;   // the tag is on the goal's near side
 #ifdef RW_SIM_PROS
     // Simulator: there's no camera. SIM_PIN_SHIFT="dx,dy" / SIM_GOAL_SHIFT="dx,dy" pretend every pin / goal sits
     // that far (route inches) from its spot and that the camera sees it perfectly, to test the lining up.
@@ -346,49 +396,74 @@ bool cameraSighting(Cam cam, AimKind kind, double expectedBearing, double& beari
     if (kind == AimKind::none || text == nullptr || std::sscanf(text, "%lf,%lf", &dx, &dy) != 2) return false;
     Vec moved = toField({dx, dy});
     double tx = fpAimSpot.x + moved.x - spot.x, ty = fpAimSpot.y + moved.y - spot.y;
-    bearing = wrap180(std::atan2(tx, ty) * 180.0 / FP_PI - heading);
-    if (std::fabs(bearing - yaw) > FP_CAM_FOV_DEG / 2.0) return false;   // outside the picture
-    if (!tags) return std::fabs(bearing - expectedBearing) <= FP_AIM_WINDOW_DEG;
-    range = std::max(std::hypot(tx, ty) - FP_GOAL_TAG_TO_CENTER, 0.0);   // the tag is on the goal's face
-    return goalError(bearing, range) <= FP_GOAL_TAG_WINDOW_IN;
+    double seen = wrap180(std::atan2(tx, ty) * 180.0 / FP_PI - then.heading);
+    if (std::fabs(seen - yaw) > FP_CAM_FOV_DEG / 2.0) return false;   // outside the picture
+    if (!tags && cam == Cam::claw && std::fabs(seen) > FP_AIM_AHEAD_DEG) return false;   // claw camera: nearly straight ahead
+    if (std::fabs(seen - expected) > 80.0) return false;
+    sideways = reach * std::tan(rad(seen - expected));
+    return std::fabs(sideways) <= window;
 #else
+    (void)then;
+    (void)spot;
     int32_t count = camera(cam).get_object_count();
     if (count <= 0 || count > 64) return false;   // nothing, or the sensor isn't answering (PROS_ERR)
     bool found = false;
-    double bestOff = tags ? FP_GOAL_TAG_WINDOW_IN : FP_AIM_WINDOW_DEG;   // inches for tags, degrees for pins
+    double bestRank = -1e9;
+    double cupLow = 1e9, cupHigh = -1e9, cupSum = 0;   // pickups: the cups in the window
+    int cups = 0;
     for (int32_t i = 0; i < count; i++) {
         pros::AIVision::Object seen = camera(cam).get_object(i);
-        double centerPx = 0, sizePx = 0;
+        double centerPx = 0, rank = 0;
         if (tags) {
             if (!(seen.type & pros::E_AIVISION_DETECTED_TAG)) continue;
             if (fpAimTagId >= 0 && seen.id != fpAimTagId) continue;
             const auto& t = seen.object.tag;
             centerPx = (t.x0 + t.x1 + t.x2 + t.x3) / 4.0;
-            // The tag's size in pixels: its longest edge (the edges that face the camera square-on keep their
-            // length when the tag is seen from an angle, the others shrink)
-            sizePx = std::max({std::hypot(t.x1 - t.x0, t.y1 - t.y0), std::hypot(t.x2 - t.x1, t.y2 - t.y1),
-                               std::hypot(t.x3 - t.x2, t.y3 - t.y2), std::hypot(t.x0 - t.x3, t.y0 - t.y3)});
-            if (sizePx < FP_GOAL_TAG_MIN_PX) continue;
+            // The four edges, as the pair that runs across the picture and the pair that runs up it
+            const double e01 = std::hypot(t.x1 - t.x0, t.y1 - t.y0), e12 = std::hypot(t.x2 - t.x1, t.y2 - t.y1);
+            const double e23 = std::hypot(t.x3 - t.x2, t.y3 - t.y2), e30 = std::hypot(t.x0 - t.x3, t.y0 - t.y3);
+            const bool firstPairAcross = std::abs(t.x1 - t.x0) + std::abs(t.x3 - t.x2) >= std::abs(t.y1 - t.y0) + std::abs(t.y3 - t.y2);
+            const double wide = firstPairAcross ? (e01 + e23) / 2.0 : (e12 + e30) / 2.0;
+            const double tall = firstPairAcross ? (e12 + e30) / 2.0 : (e01 + e23) / 2.0;
+            if (tall < FP_GOAL_TAG_MIN_PX) continue;
+            // A tag turned away from the camera looks narrower than it is tall, and it sits off to one side of the
+            // goal's center: only a tag that faces the camera is lined up on
+            const double squareness = std::min(wide / tall, 1.0);
+            if (squareness < FP_GOAL_TAG_MIN_SQUARENESS) continue;
+            rank = squareness;   // the one that faces the camera most
         } else {
             if (!(seen.type & pros::E_AIVISION_DETECTED_OBJECT)) continue;
-            if (FP_PIN_CLASS_ID >= 0 && seen.id != FP_PIN_CLASS_ID) continue;
+            if (!isCupClass(seen.id)) continue;   // cups only: the model finds pins too unreliably
             if (seen.object.element.score < AI_VISION_MIN_SCORE) continue;   // too unsure (include/robot.hpp)
-            // Claw camera: the gears fill the bottom of the picture. Something that starts down there is a gear.
-            if (cam == Cam::claw && seen.object.element.yoffset >= FP_CLAW_CAM_BLOCKED_FROM_PX) continue;
+            // Claw camera: the gears fill the bottom of the picture. A box centered down there is a gear / the claw.
+            if (cam == Cam::claw && seen.object.element.yoffset + seen.object.element.height / 2 >= FP_CLAW_CAM_MAX_CENTER_Y) continue;
             centerPx = seen.object.element.xoffset + seen.object.element.width / 2.0;
         }
         if (cam == Cam::field ? FP_GOAL_CAM_UPSIDE_DOWN : FP_PIN_CAM_UPSIDE_DOWN) centerPx = FP_CAM_WIDTH_PX - centerPx;
-        double sideways = (centerPx - FP_CAM_WIDTH_PX / 2.0) / FP_CAM_FOCAL_PX;   // tan of the angle in the camera's picture
-        if (cam == Cam::claw) sideways /= std::cos(rad(FP_PIN_CAM_TILT_DEG));     // the claw camera looks down: undo the squash
-        double seenBearing = std::atan(sideways) * 180.0 / FP_PI + yaw;
-        double seenRange = tags ? FP_CAM_FOCAL_PX * FP_GOAL_TAG_SIZE_IN / sizePx : 0.0;
-        double off = tags ? goalError(seenBearing, seenRange) : std::fabs(seenBearing - expectedBearing);
-        if (off <= bestOff) {
-            bestOff = off;
-            bearing = seenBearing;
-            range = seenRange;
+        double tanAcross = (centerPx - FP_CAM_WIDTH_PX / 2.0) / FP_CAM_FOCAL_PX;   // tan of the angle in the camera's picture
+        if (cam == Cam::claw) tanAcross /= std::cos(rad(FP_PIN_CAM_TILT_DEG));     // the claw camera looks down: undo the squash
+        const double seenBearing = std::atan(tanAcross) * 180.0 / FP_PI + yaw;
+        if (!tags && cam == Cam::claw && std::fabs(seenBearing) > FP_AIM_AHEAD_DEG) continue;   // claw camera: nearly straight ahead
+        if (std::fabs(seenBearing - expected) > 80.0) continue;
+        const double off = reach * std::tan(rad(seenBearing - expected));
+        if (std::fabs(off) > window) continue;   // not where the thing should be: something else
+        if (!tags) {
+            cupLow = std::min(cupLow, off);
+            cupHigh = std::max(cupHigh, off);
+            cupSum += off;
+            cups++;
+            continue;
+        }
+        if (rank > bestRank) {
+            bestRank = rank;
+            sideways = off;
             found = true;
         }
+    }
+    if (!tags) {
+        if (cups == 0 || cupHigh - cupLow > FP_AIM_SAME_IN) return false;   // none, or not sure which: skip this frame
+        sideways = cupSum / cups;
+        return true;
     }
     return found;
 #endif
@@ -397,48 +472,46 @@ bool cameraSighting(Cam cam, AimKind kind, double expectedBearing, double& beari
 // One camera's look at the thing being aimed at. true = it saw it, and the nudge was updated from it.
 bool aimWith(Cam cam) {
     const bool tag = fpAimKind == AimKind::goalTag;
-    double heading = getInertialHeading();
-    Vec r = rightOf(heading);
-    Vec spot = cameraSpot(cam, heading);
-    double dx = fpAimSpot.x - spot.x, dy = fpAimSpot.y - spot.y;
-    double dist = std::hypot(dx, dy);
-    double maxDist = tag ? FP_GOAL_AIM_MAX_DIST : (cam == Cam::field ? FP_FIELD_PIN_MAX_DIST : FP_AIM_MAX_DIST);
+    if (std::fabs(odom_turn_rate_dps) > FP_AIM_MAX_TURN_DPS) return false;   // spinning too fast for a sharp picture
+    if (cam == Cam::claw && !clawOpenForCamera()) return false;              // claw not open: its arms are in the picture
+    const PastPose then = poseAgo(FP_CAM_LATENCY_MS);
+    const Vec spot = cameraSpot(cam, then);
+    const double dx = fpAimSpot.x - spot.x, dy = fpAimSpot.y - spot.y;
+    const double dist = std::hypot(dx, dy);
+    const double maxDist = tag ? FP_GOAL_AIM_MAX_DIST : (cam == Cam::field ? FP_FIELD_PIN_MAX_DIST : FP_AIM_MAX_DIST);
     if (dist > maxDist || dist < (tag ? FP_GOAL_AIM_MIN_DIST : FP_AIM_MIN_DIST)) return false;
-    double expected = wrap180(std::atan2(dx, dy) * 180.0 / FP_PI - heading);
-    if (std::fabs(expected - camYaw(cam)) > FP_CAM_FOV_DEG / 2.0 - 4.0) return false;   // not in this camera's picture yet
-    double seen = 0, range = 0;
-    if (!cameraSighting(cam, fpAimKind, expected, seen, range)) return false;
+    const double expected = wrap180(std::atan2(dx, dy) * 180.0 / FP_PI - then.heading);
+    if (std::fabs(expected - camYaw(cam)) > FP_CAM_FOV_DEG / 2.0 + 8.0) return false;   // nowhere near this camera's picture
+    double sideways = 0;
+    if (!cameraSighting(cam, fpAimKind, then, spot, expected, dist, sideways)) return false;
     fpAimSightings++;
+    fpAimSeenMs = pros::millis();
 
-    Vec want;   // where the curve should be moved to (field inches)
-    double smooth = FP_AIM_SMOOTH;
-    if (tag && range > 0.0) {
-        // The tag gives a direction and a distance: where the goal's center really is. The nudge is the difference
-        // from where it should be, in any direction (sideways AND closer / further), capped at FP_GOAL_MAX_SHIFT.
-        Vec goal = goalFromTag(spot, heading, seen, range);
-        want = {goal.x - fpAimSpot.x, goal.y - fpAimSpot.y};
-        double size = std::hypot(want.x, want.y);
-        if (size > FP_GOAL_MAX_SHIFT) {
-            want.x *= FP_GOAL_MAX_SHIFT / size;
-            want.y *= FP_GOAL_MAX_SHIFT / size;
-        }
-        smooth = FP_GOAL_AIM_SMOOTH;
-    } else {
-        // Only a direction: it's this far to the side of where odometry says it should be
-        double sideways = clampTo(dist * std::tan(rad(seen - expected)), -FP_AIM_MAX_SHIFT, FP_AIM_MAX_SHIFT);
-        want = {r.x * sideways, r.y * sideways};
+    // The thing is `sideways` inches to the right of where it should be, looking from the camera: the curve is moved
+    // that way, ACROSS the line of sight (not along the robot's own side: in a curve those two aren't the same)
+    const double most = tag ? FP_GOAL_MAX_SHIFT : FP_AIM_MAX_SHIFT;
+    sideways = clampTo(sideways, -most, most);
+    const Vec across = rightOf(then.heading + expected);
+    const double smooth = tag ? FP_GOAL_AIM_SMOOTH : FP_AIM_SMOOTH;
+    Vec step = {smooth * (across.x * sideways - fpAimShift.x), smooth * (across.y * sideways - fpAimShift.y)};
+    const double size = std::hypot(step.x, step.y), mostStep = FP_AIM_SLEW_IPS * FP_AIM_PERIOD_MS / 1000.0;
+    if (size > mostStep) {
+        step.x *= mostStep / size;
+        step.y *= mostStep / size;
     }
-    fpAimShift.x += smooth * (want.x - fpAimShift.x);
-    fpAimShift.y += smooth * (want.y - fpAimShift.y);
+    fpAimShift.x += step.x;
+    fpAimShift.y += step.y;
     return true;
 }
 
 void aimUpdate() {
     uint32_t now = pros::millis();
     if (fpAimKind == AimKind::none) {
-        // Not aiming: the nudge fades away so the rest of the curve is back on its drawn line
-        fpAimShift.x *= 0.9;
-        fpAimShift.y *= 0.9;
+        // Not aiming: the nudge fades away (steadily, no jump) so the rest of the curve is back on its drawn line
+        const double size = std::hypot(fpAimShift.x, fpAimShift.y), fade = FP_AIM_FADE_IPS * 0.010;
+        const double keep = size > fade ? (size - fade) / size : 0.0;
+        fpAimShift.x *= keep;
+        fpAimShift.y *= keep;
         return;
     }
     if (now - fpAimLastMs < static_cast<uint32_t>(FP_AIM_PERIOD_MS)) return;
@@ -460,14 +533,25 @@ void visionStart() {
     else if (FP_USE_GOAL_TAG) camera(Cam::field).enable_detection_types(pros::AivisionModeType::tags);
 #endif
 }
-void aimAt(AimKind kind, double routeX, double routeY, int tagId) {
+void aimAt(AimKind kind, double routeX, double routeY, int tagId, double windowIn) {
     fpAimKind = kind;
+    fpAimWindow = windowIn;
     fpAimSpot = toField({routeX, routeY});
     fpAimLastMs = 0;
     fpAimTagId = tagId;
     fpAimSightings = 0;
+    // Carrying a pin's nudge on into a goal approach: never more than a goal's own nudge is allowed to be
+    const double size = std::hypot(fpAimShift.x, fpAimShift.y);
+    if (kind == AimKind::goalTag && size > FP_GOAL_MAX_SHIFT) {
+        fpAimShift.x *= FP_GOAL_MAX_SHIFT / size;
+        fpAimShift.y *= FP_GOAL_MAX_SHIFT / size;
+    }
 }
 void aimStop() {
+    if (fpAimKind == AimKind::pin) {
+        std::printf("%s %5.2f s  pin camera: seen %d times, curve moved %.1f in (x %+.1f  y %+.1f)\n", fpRouteName,
+                    elapsed() / 1000.0, fpAimSightings, std::hypot(fpAimShift.x, fpAimShift.y), fpAimShift.x, fpAimShift.y);
+    }
     if (fpAimKind == AimKind::goalTag) {
         if (fpAimSightings > 0) {
             std::printf("%s %5.2f s  goal tag: seen %d times, approach moved %.1f in (x %+.1f  y %+.1f)\n", fpRouteName,
@@ -479,6 +563,94 @@ void aimStop() {
     fpAimKind = AimKind::none;
 }
 Vec aimShift() { return fpAimShift; }
+int aimSightings() { return fpAimSightings; }
+
+// =====================================================================
+//   VISION PICKUP TOOL: find one cup with both cameras (src/tuning.cpp, tuneVisionPickup)
+// =====================================================================
+namespace {
+#ifndef RW_SIM_PROS
+// The bearing (degrees right of the robot's straight ahead, from the camera) of the ONE cup this camera sees now,
+// with the autos' filters. false = no cup, or two that disagree by more than 6 degrees (about 1.5" at 14").
+bool oneCupBearing(Cam cam, double& bearing) {
+    const int32_t count = camera(cam).get_object_count();
+    if (count <= 0 || count > 64) return false;
+    double low = 1e9, high = -1e9, sum = 0;
+    int n = 0;
+    for (int32_t i = 0; i < count; i++) {
+        pros::AIVision::Object seen = camera(cam).get_object(i);
+        if (!(seen.type & pros::E_AIVISION_DETECTED_OBJECT)) continue;
+        if (!isCupClass(seen.id) || seen.object.element.score < AI_VISION_MIN_SCORE) continue;
+        const auto& box = seen.object.element;
+        if (cam == Cam::claw && box.yoffset + box.height / 2 >= FP_CLAW_CAM_MAX_CENTER_Y) continue;   // the gears / claw
+        double centerPx = box.xoffset + box.width / 2.0;
+        if (cam == Cam::field ? FP_GOAL_CAM_UPSIDE_DOWN : FP_PIN_CAM_UPSIDE_DOWN) centerPx = FP_CAM_WIDTH_PX - centerPx;
+        double tanAcross = (centerPx - FP_CAM_WIDTH_PX / 2.0) / FP_CAM_FOCAL_PX;
+        if (cam == Cam::claw) tanAcross /= std::cos(rad(FP_PIN_CAM_TILT_DEG));
+        const double b = std::atan(tanAcross) * 180.0 / FP_PI + camYaw(cam);
+        if (cam == Cam::claw && std::fabs(b) > 30.0) continue;   // finding it: a wider look than the autos' FP_AIM_AHEAD_DEG
+        low = std::min(low, b);
+        high = std::max(high, b);
+        sum += b;
+        n++;
+    }
+    if (n == 0 || high - low > 6.0) return false;
+    bearing = sum / n;
+    return true;
+}
+#endif
+}  // namespace
+
+CupFix locateCup(int ms) {
+    CupFix fix;
+    std::vector<double> xs, ys;
+    const uint32_t start = pros::millis();
+    while (pros::millis() - start < static_cast<uint32_t>(ms)) {
+        service();
+        fix.frames++;
+#ifdef RW_SIM_PROS
+        // Simulator: no cameras. SIM_CUP="x,y" (robot frame) pretends both see a cup there.
+        const char* text = std::getenv("SIM_CUP");
+        double sx = 0, sy = 0;
+        if (text != nullptr && std::sscanf(text, "%lf,%lf", &sx, &sy) == 2) {
+            xs.push_back(sx);
+            ys.push_back(sy);
+        }
+#else
+        double clawDeg = 0, fieldDeg = 0;
+        const bool clawSees = oneCupBearing(Cam::claw, clawDeg);
+        const bool fieldSees = oneCupBearing(Cam::field, fieldDeg);
+        if (clawSees && !fieldSees) fix.clawOnly++;
+        if (fieldSees && !clawSees) fix.fieldOnly++;
+        if (clawSees && fieldSees) {
+            // Two lines of sight: from each lens along its bearing. Where they cross is the cup.
+            const Vec c = {0.0, FP_PIN_CAM_FORWARD}, f = {FP_GOAL_CAM_RIGHT, FP_GOAL_CAM_FORWARD};
+            const Vec dc = {std::sin(rad(clawDeg)), std::cos(rad(clawDeg))}, df = {std::sin(rad(fieldDeg)), std::cos(rad(fieldDeg))};
+            const double cross = dc.x * df.y - dc.y * df.x;
+            if (std::fabs(cross) > std::sin(rad(2.0))) {   // not (nearly) parallel
+                const double t = ((f.x - c.x) * df.y - (f.y - c.y) * df.x) / cross;   // inches along the claw camera's line
+                const double s = ((f.x - c.x) * dc.y - (f.y - c.y) * dc.x) / cross;   // ...and the field camera's
+                const double x = c.x + dc.x * t, y = c.y + dc.y * t;
+                if (t > 0 && s > 0 && y > 0 && y < 60) {
+                    xs.push_back(x);
+                    ys.push_back(y);
+                }
+            }
+        }
+#endif
+        pros::delay(30);
+    }
+    fix.fixes = static_cast<int>(xs.size());
+    if (fix.fixes >= 5) {
+        std::vector<double> sx = xs, sy = ys;
+        std::nth_element(sx.begin(), sx.begin() + sx.size() / 2, sx.end());
+        std::nth_element(sy.begin(), sy.begin() + sy.size() / 2, sy.end());
+        fix.x = sx[sx.size() / 2];
+        fix.y = sy[sy.size() / 2];
+        for (size_t i = 0; i < xs.size(); i++) fix.spread = std::max(fix.spread, std::hypot(xs[i] - fix.x, ys[i] - fix.y));
+    }
+    return fix;
+}
 
 // =====================================================================
 //   SERVICE: runs every 10 ms while the robot drives or waits. Lift, claw, flipper, intake, tip guard, timer.
@@ -487,9 +659,14 @@ void service() {
     uint32_t now = pros::millis();
 
     // Timer: lift PID off and limp just before the end
-    if (!fpTimeUp && elapsed() >= fpLimitMs - FP_COAST_BEFORE_END_MS) {
+    if (!fpTimeUp && elapsed() >= fpLimitMs - fpEndReserveMs) {
         fpTimeUp = true;
         liftCoast();
+    }
+    rememberPose();   // for the cameras (their pictures are a moment old)
+    if (fpStatusOnPad && now - fpStatusLastMs >= 250) {
+        fpStatusLastMs = now;
+        statusToPad();
     }
 
     // Tip guard
@@ -500,15 +677,18 @@ void service() {
             bool liftUp = fpLiftMode == LiftMode::pid && getDR4BPosition() > FP_TIP_MIN_LIFT;
             fpTipTicks = (rollOk && liftUp && std::fabs(roll) > FP_TIP_ROLL_LIMIT) ? fpTipTicks + 1 : 0;
             if (fpTipTicks >= FP_TIP_CONFIRM_TICKS) {
-                fpTipping = true;
                 fpTipRestoreGoal = fpLiftGoal;
                 liftDown();
+                fpTipRestoreDown = false;
+                fpTipping = true;
             }
         } else if (!rollOk || std::fabs(roll) < FP_TIP_ROLL_CLEAR) {
-            // Level again: back to the height it was going to, and on with the route
+            // Level again: back to the height the route wants now, and on with the route. If the route has let go and
+            // sent the lift down in the meantime, it stays down. (It used to go back up to the old scoring height
+            // even then, and the robot drove off with the lift up.)
             fpTipping = false;
             fpTipTicks = 0;
-            liftTo(fpTipRestoreGoal);
+            if (!fpTipRestoreDown) liftTo(fpTipRestoreGoal);
         }
     }
 
@@ -589,7 +769,9 @@ void coreStart(const char* routeName, int limitMs) {
     fpRouteName = routeName;
     fpStartMs = pros::millis();
     fpLimitMs = limitMs;
+    fpEndReserveMs = FP_COAST_BEFORE_END_MS;
     fpTimeUp = false;
+    fpPastFilled = 0;
     fpLiftMode = LiftMode::idle;
     fpLiftPending = false;
     fpLiftPress = false;
@@ -599,21 +781,34 @@ void coreStart(const char* routeName, int limitMs) {
     fpIntakeOffAtMs = 0;
     fpTipping = false;
     fpTipTicks = 0;
+    fpTipRestoreDown = false;
     fpAimKind = AimKind::none;
+    fpAimWindow = 0.0;
     fpAimShift = {0, 0};
     left_chassis.set_brake_mode_all(pros::E_MOTOR_BRAKE_BRAKE);
     right_chassis.set_brake_mode_all(pros::E_MOTOR_BRAKE_BRAKE);
     flipper.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);   // off = limp, never held against its stop
     visionStart();
+    // A route always runs with MCL correcting (a tuning tool that paused it may have been cut off by field control)
+    pauseFieldMcl(false);
+    fpStatusOnPad = true;
+    fpStatusLastMs = 0;
+    pad::line(2, "%s", "");
 }
 
-void finishSafe() {
-    stopChassis(pros::MotorBrake::brake);
+void finishSafe(bool stopDrive) {
+    if (stopDrive) stopChassis(pros::MotorBrake::brake);
     intake.move_voltage(0);
     flipper.move_voltage(0);
     if (clawHolding()) claw.move_voltage(FP_CLAW_HOLD_MV);
     else claw.move_voltage(0);
     if (fpTimeUp) note("time up: lift limp");
+    if (fpStatusOnPad) {
+        // Stays on the controller after the route: how long it took, where it ended, and its last step (line 2)
+        pad::line(0, "%-7.7s END %.1fs%s", fpRouteName, elapsed() / 1000.0, fpTimeUp ? " T" : "");   // T = ran out of time
+        pad::line(1, "X%.1f Y%.1f H%.0f", x_pos, y_pos, heading360());
+        fpStatusOnPad = false;   // nothing updates it now
+    }
 }
 
 // =====================================================================
@@ -633,8 +828,11 @@ Curve makeCurve(const std::vector<Node>& nodes, bool reverse, double maxSpeed, d
         Vec ta = forwardOf(a.heading + (reverse ? 180.0 : 0.0));   // direction of travel at each end
         Vec tb = forwardOf(b.heading + (reverse ? 180.0 : 0.0));
         double chord = std::hypot(b.x - a.x, b.y - a.y);
-        double ka = a.tangentOut > 0 ? a.tangentOut : 0.4 * chord;
-        double kb = b.tangentIn > 0 ? b.tangentIn : 0.4 * chord;
+        // A tangent longer than the nodes are apart makes the curve loop back on itself (a spot the robot then
+        // spins round at walking pace). The nodes are never exactly where they were drawn, since most curves start
+        // from wherever the robot really is, so a set tangent is cut to 3/4 of the gap.
+        double ka = std::min(a.tangentOut > 0 ? a.tangentOut : 0.4 * chord, 0.75 * chord);
+        double kb = std::min(b.tangentIn > 0 ? b.tangentIn : 0.4 * chord, 0.75 * chord);
         Vec p0 = {a.x, a.y}, p1 = {a.x + ta.x * ka, a.y + ta.y * ka};
         Vec p3 = {b.x, b.y}, p2 = {b.x - tb.x * kb, b.y - tb.y * kb};
         int steps = std::max(static_cast<int>(chord * 4), 16);
@@ -756,21 +954,18 @@ double sideVolts(double speed, double accel, double measured) {
     return drive_kS * direction + kV * speed + kA * accel + FP_SPEED_FEEDBACK * (speed - measured);
 }
 
-// Top speed right now: slower with the lift up, crawling while it recovers from a tip
-double speedCapNow(double& accelNow) {
+// Top speed right now: slower the higher the lift is (or is headed), crawling while it recovers from a tip.
+// accelNow / decelNow: how fast the speed may rise / fall (in/s per second).
+double speedCapNow(double& accelNow, double& decelNow) {
+    // The higher of where the lift is and where it's been told to go: the cap is on from the moment it starts up
+    // until it's back down after letting go
     double lift = getDR4BPosition();
+    if (fpLiftMode == LiftMode::pid) lift = std::max(lift, fpLiftGoal);
+    if (fpLiftPending || fpLiftMode == LiftMode::hop) lift = std::max(lift, fpHopThen);
     double tall = clampTo((lift - FP_TALL_LIFT_LO) / (FP_TALL_LIFT_HI - FP_TALL_LIFT_LO), 0.0, 1.0);
     accelNow = FP_ACCEL + (FP_TALL_ACCEL - FP_ACCEL) * tall;
+    decelNow = 2.0 * FP_DECEL + (FP_TALL_DECEL - 2.0 * FP_DECEL) * tall;
     double cap = FP_MAX_SPEED + (FP_TALL_SPEED - FP_MAX_SPEED) * tall;
-    // Scoring drive: from the moment the lift is told to go up to a scoring height, until it's back down below
-    // the slow height after letting go (covers lifting on the way in and lowering on the way out)
-    const double slowAbove = getStackHeight(GOAL_ALLIANCE, 2) + FP_MOVING_SLOW_MARGIN;
-    bool headedUp = (fpLiftMode == LiftMode::pid && fpLiftGoal > slowAbove) ||
-                    ((fpLiftPending || fpLiftMode == LiftMode::hop) && fpHopThen > slowAbove);
-    if (headedUp || lift > slowAbove) {
-        cap = std::min(cap, FP_MOVING_SPEED);
-        accelNow = std::min(accelNow, FP_MOVING_ACCEL);
-    }
     if (fpTipping) cap = std::min(cap, FP_TIP_SPEED);
     return cap;
 }
@@ -837,8 +1032,9 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
         }
 
         // Speed: the plan, the lift / tip limit, and the gate
-        double accelNow = FP_ACCEL;
-        double target = std::min(curve.points[closest].speed, speedCapNow(accelNow));
+        double accelNow = FP_ACCEL, decelNow = 2.0 * FP_DECEL;
+        const double capNow = speedCapNow(accelNow, decelNow);
+        double target = std::min(curve.points[closest].speed, capNow);
         bool holding = false;
         if (!gateOpen && !(options.gateReady && options.gateReady())) {
             // Lift not up (yet, or it dropped for a tip): slow down to stop at the gate, or stop right here if it's past it
@@ -854,15 +1050,20 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
                 double eta = options.gateEta() + FP_GATE_ETA_BUFFER_S;
                 // Right at the end (room and time both near 0) the ratio gets jumpy, so it just keeps its speed
                 double creep = (eta > FP_GATE_ETA_BUFFER_S + 0.2 || !crept) ? room / eta : creepHold;
-                creepHold = clampTo(creep, FP_GATE_CREEP_MIN, FP_MOVING_SPEED);   // the steady speed it's creeping in at
-                target = std::min(target, creepHold);
-                crept = true;
+                creep = std::max(creep, FP_GATE_CREEP_MIN);
+                // Only counts as creeping when the lift really is what's holding it back. (It used to count from the
+                // first moment of every scoring drive and capped the whole drive at 28 in/s, lift up or not.)
+                if (creep < target) {
+                    creepHold = creep;   // the steady speed it's creeping in at
+                    target = creep;
+                    crept = true;
+                }
             } else {
                 target = std::min(target, std::sqrt(2.0 * FP_TALL_ACCEL * room));
             }
         } else if (crept) {
             // Lift is up after creeping in: keep the creep speed the rest of the way (no speed-up with the lift high)
-            target = std::min(target, clampTo(creepHold, FP_GATE_CREEP_MIN, FP_MOVING_SPEED));
+            target = std::min(target, std::max(creepHold, FP_GATE_CREEP_MIN));
         }
         if (holding) {
             // Waiting for the lift: stand still, and use the wait to point straight down the curve
@@ -882,7 +1083,7 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
             continue;
         }
         if (target > command) command = std::min(target, command + accelNow * 0.010);
-        else command = std::max(target, command - 2.0 * FP_DECEL * 0.010);
+        else command = std::max(target, command - decelNow * 0.010);
         command = std::max(command, FP_MIN_SPEED);
 
         // Steering: the curve's own bend a little ahead, plus a correction for being off it / pointing off it.
@@ -893,10 +1094,13 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
         double travelHeading = getInertialHeading() + (curve.reverse ? 180.0 : 0.0);
         Vec pathRight = rightOf(here.heading);
         double offRight = (px - here.x) * pathRight.x + (py - here.y) * pathRight.y;   // + = robot is right of the curve
+        offRight = clampTo(offRight, -FP_STEER_MAX_OFF, FP_STEER_MAX_OFF);             // a position jump is never a swerve
         double pointOff = rad(wrap180(there.heading - travelHeading));                 // + = curve points right of the robot
+        // Chases a point FP_STEER_TIME_S of driving ahead: further ahead the faster it goes
+        const double steerDist = clampTo(command * FP_STEER_TIME_S, FP_STEER_DIST, FP_STEER_DIST_MAX);
         double turnRate = command * there.curvature                                     // rad/s, + = clockwise
-                          - command * 2.0 * offRight / (FP_STEER_DIST * FP_STEER_DIST)
-                          + std::max(2.0 * command / FP_STEER_DIST, FP_HEADING_GAIN) * pointOff;
+                          - command * 2.0 * offRight / (steerDist * steerDist)
+                          + std::max(2.0 * command / steerDist, FP_HEADING_GAIN) * pointOff;
         turnRate = clampTo(turnRate, -rad(FP_MAX_TURN_DPS) * 1.5, rad(FP_MAX_TURN_DPS) * 1.5);
 
         // Each side's speed (faster on the outside of the curve; backwards mirrors which side that is)
@@ -926,7 +1130,9 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
         // Against something: told to drive, not moving and not turning
         if (command >= FP_MIN_SPEED && odom_speed_ips < 1.0 && std::fabs(odom_turn_rate_dps) < 60.0 && pros::millis() - start > 200) stalledMs += 10;
         else stalledMs = 0;
-        if (stalledMs >= options.stallMs) {
+        // Driving into something at the end (a goal, the wall): close to the end, touching it is enough
+        const int stallLimit = (options.endStallMs > 0 && left <= options.endStallIn) ? options.endStallMs : options.stallMs;
+        if (stalledMs >= stallLimit) {
             if (options.brakeAtEnd) stopChassis(pros::MotorBrake::brake);
             return MoveEnd::stalled;
         }
@@ -939,8 +1145,11 @@ MoveEnd follow(const Curve& curve, const MoveOptions& options) {
 bool spinTo(double heading, int maxMs) {
     const double halfTrack = distance_between_wheels / 2.0;
     const double target = headingToField(heading);
+    const double inchesPerRpm = wheel_distance_in / 60.0;
     uint32_t start = pros::millis();
-    int doneMs = 0;
+    double rate = 0.0;       // degrees/s it's being asked to turn at (+ = clockwise)
+    double lastSpin = 0.0;   // in/s each side was last asked for
+    const double firstOff = wrap180(target - getInertialHeading());
     while (pros::millis() - start < static_cast<uint32_t>(maxMs)) {
         service();
         if (fpTimeUp) {
@@ -948,18 +1157,26 @@ bool spinTo(double heading, int maxMs) {
             return false;
         }
         double off = wrap180(target - getInertialHeading());   // + = turn right
-        if (std::fabs(off) < FP_SPIN_DONE_DEG) {
-            doneMs += 10;
-            if (doneMs >= FP_SPIN_DONE_MS) break;
-            stopChassis(pros::MotorBrake::brake);
-        } else {
-            doneMs = 0;
-            double spin = rad(clampTo(FP_SPIN_GAIN * off, -FP_SPIN_MAX_DPS, FP_SPIN_MAX_DPS)) * halfTrack;
-            driveChassis(sideVolts(spin, 0, 0), sideVolts(-spin, 0, 0));
-        }
+        // There: close, and no longer swinging fast (a turn that overshoots is brought back, not left there)
+        if (std::fabs(off) < FP_SPIN_DONE_DEG && std::fabs(odom_turn_rate_dps) < FP_SPIN_DONE_DPS) break;
+        // As fast as it can still brake from: v = sqrt(2 * decel * degrees left)
+        double want = std::min(FP_SPIN_MAX_DPS, std::sqrt(2.0 * FP_SPIN_DECEL_DPS2 * std::fabs(off)));
+        want = std::max(want, FP_SPIN_MIN_DPS) * (off > 0 ? 1.0 : -1.0);
+        const double step = FP_SPIN_ACCEL_DPS2 * 0.010;
+        rate = std::fabs(want) < std::fabs(rate) ? want : clampTo(want, rate - step, rate + step);   // brakes at once, spins up steadily
+        double spin = rad(rate) * halfTrack;
+        double accel = clampTo((spin - lastSpin) / 0.010, -FP_FF_ACCEL_MAX, FP_FF_ACCEL_MAX);
+        lastSpin = spin;
+        driveChassis(sideVolts(spin, accel, left_chassis.get_actual_velocity() * inchesPerRpm),
+                     sideVolts(-spin, -accel, right_chassis.get_actual_velocity() * inchesPerRpm));
         pros::delay(10);
     }
     stopChassis(pros::MotorBrake::brake);
+    const double endOff = wrap180(target - getInertialHeading());
+    if (std::fabs(endOff) > 2.0 * FP_SPIN_DONE_DEG) {
+        std::printf("%s %5.2f s  turn of %.0f deg ended %.1f deg off after %d ms\n", fpRouteName, elapsed() / 1000.0, firstOff, endOff,
+                    static_cast<int>(pros::millis() - start));
+    }
     return true;
 }
 
@@ -1030,24 +1247,94 @@ bool letGo(int settleMs, int releaseMs, int lowerBeforeOpenMs) {
         note("at the goal: let go");
         clawOpen();
     }
+    // The reset (up to 0.12 s) runs inside the release wait, not on top of it: no extra time standing at the goal
+    const uint32_t resetStart = pros::millis();
     if (FP_RESET_AT_GOALS) fieldAwareReset(FP_RESET_MAX_JUMP);
-    return waitMs(releaseMs);
+    return waitMs(std::max(releaseMs - static_cast<int>(pros::millis() - resetStart), 0));
 }
 
-bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY,
-                    double scoreHeight, double goalX, double goalY, int goalTagId, int pinSlowMs, int scoreSlowMs, int settleMs,
-                    int releaseMs, int lowerBeforeOpenMs) {
+namespace {
+// A pin picked up on the way to the goal
+struct PinPlan {
+    int node;
+    double x, y, mclX, mclY;
+    int slowMs;
+};
+
+// Caps the speed between two distances along the curve, and brakes down to it in time
+void capSpeed(Curve& curve, double fromAt, double toAt, double speed) {
+    const int n = static_cast<int>(curve.points.size());
+    if (n < 2 || speed <= 0.0) return;
+    speed = std::max(speed, FP_MIN_SPEED);
+    const int first = std::min(std::max(static_cast<int>(std::lround(fromAt / FP_SAMPLE_STEP)), 0), n - 1);
+    const int last = std::min(std::max(static_cast<int>(std::lround(toAt / FP_SAMPLE_STEP)), 0), n - 1);
+    for (int i = first; i <= last; i++) curve.points[i].speed = std::min(curve.points[i].speed, speed);
+    for (int i = n - 1; i > 0; i--) {
+        double before = std::sqrt(curve.points[i].speed * curve.points[i].speed + 2.0 * FP_DECEL * FP_SAMPLE_STEP);
+        curve.points[i - 1].speed = std::min(curve.points[i - 1].speed, before);
+    }
+}
+
+// The scoring move: along the curve (through a pin first, if there is one) into the goal, lift up in time, let go.
+bool runScore(std::vector<Node> nodes, const PinPlan* pin, const ScorePlan& plan) {
+    if (nodes.size() < 2) return !fpTimeUp;
+    // The curve carries on past the spot where the claw should be on the goal: the goal stops the robot
+    const double push = std::max(plan.pushIn, 0.0);
+    if (push > 0.0) nodes.push_back(along(nodes.back(), push));
     Curve curve = makeCurve(nodes, false, FP_MAX_SPEED, 0.0);
-    double grabAt = curve.nodeIndex[pinNode] * FP_SAMPLE_STEP;   // inches along the curve where the pin is in the claw
-    addSlowdown(curve, grabAt, pinSlowMs, FP_PICKUP_SLOW_SPEED);
-    addSlowdownAtEnd(curve, scoreSlowMs, FP_SCORE_SLOW_SPEED);
-    bool grabbed = false;
-    aimAt(AimKind::pin, pinX, pinY);
+    const int n = static_cast<int>(curve.points.size());
+    const double length = curve.length();
+    const double seatAt = length - push;                         // inches along the curve where the claw is on the goal
+    const double gateAt = seatAt - FP_SCORE_GATE_IN;             // ...and where the lift has to be up by
+    const double grabAt = pin ? curve.nodeIndex[pin->node] * FP_SAMPLE_STEP : -1.0;
+    if (pin) addSlowdown(curve, grabAt, pin->slowMs, FP_PICKUP_SLOW_SPEED);
+    addSlowdown(curve, seatAt, plan.scoreSlowMs, FP_SCORE_SLOW_SPEED);
+    if (plan.approachSpeed > 0.0) capSpeed(curve, seatAt - plan.approachIn, length, plan.approachSpeed);
+    // Meeting the goal: gently, so the stack that's already on it isn't knocked
+    if (push > 0.0) capSpeed(curve, seatAt - 1.5, length, FP_CONTACT_SPEED);
+
+    // Seconds from each point of the curve to the gate, at the planned speeds (speeding up from how fast it's going now)
+    std::vector<double> toGate(n, 0.0);
+    {
+        std::vector<double> speedAt(n);
+        double speed = std::max(odom_speed_ips, FP_MIN_SPEED);
+        for (int i = 0; i < n; i++) {
+            speed = std::min(curve.points[i].speed, std::sqrt(speed * speed + 2.0 * FP_ACCEL * FP_SAMPLE_STEP));
+            speedAt[i] = std::max(speed, FP_MIN_SPEED);
+        }
+        const int gateIndex = std::min(std::max(static_cast<int>(std::lround(gateAt / FP_SAMPLE_STEP)), 0), n - 1);
+        for (int i = gateIndex - 1; i >= 0; i--) toGate[i] = toGate[i + 1] + FP_SAMPLE_STEP / ((speedAt[i] + speedAt[i + 1]) / 2.0);
+    }
+    const double liftLead = liftSeconds(plan.height) + FP_LIFT_LEAD_MARGIN_S;   // the lift starts up this long before the gate
+
+    bool grabbed = pin == nullptr;
+    bool liftStarted = false;
+    auto aimGoal = [&]() {
+        if (FP_USE_GOAL_TAG && plan.tagId != NO_GOAL_TAG) aimAt(AimKind::goalTag, plan.goalX, plan.goalY, plan.tagId);
+    };
+    if (pin) {
+        aimAt(AimKind::pin, pin->x, pin->y);
+    } else {
+        aimGoal();
+        if (!plan.liftLate) {
+            liftTo(plan.height);
+            liftStarted = true;
+        }
+    }
 
     MoveOptions options;
-    options.gateBeforeEnd = FP_SCORE_GATE_IN;
+    options.gateBeforeEnd = FP_SCORE_GATE_IN + push;
     options.gateHold = fpGateHold;
-    options.gateReady = []() { return liftReady() && !fpTipping; };
+    options.gateReady = [&]() { return liftStarted && liftReady() && !fpTipping; };
+    options.gateEta = [&]() {
+        if (!liftStarted) return liftSeconds(plan.height);
+        double climb = plan.height - FP_LIFT_READY_TOLERANCE - std::max(getDR4BPosition(), 0.0);
+        return std::max(climb, 0.0) / FP_LIFT_UP_DPS;
+    };
+    if (push > 0.0) {
+        options.endStallMs = FP_CONTACT_STALL_MS;
+        options.endStallIn = push + 1.5;
+    }
     options.tick = [&](double done, double left) {
         (void)left;
         if (!grabbed) {
@@ -1056,18 +1343,27 @@ bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, do
                 liftDown();        // lift pushed down onto the floor while it goes in for the pin
                 liftPress(true);
             }
-            if (done >= grabAt || (grabAt - done < 4.0 && clawGap(pinX, pinY) <= FP_GRAB_TOLERANCE)) {
+            if (done >= grabAt || (grabAt - done < 4.0 && clawGap(pin->x, pin->y) <= FP_GRAB_TOLERANCE)) {
                 // The pin is in the claw: close on it, full speed for FP_CLAW_FAST_MS then the hold. The lift hops
-                // off the ground like driver control's pin pickup, then carries on up to the scoring height.
+                // off the ground like driver control's pin pickup; it goes on up to the scoring height straight
+                // away, or (liftLate) stays at the hop until the goal is close.
                 grabbed = true;
                 note("claw closes on a pin");
                 clawClose();
                 liftPress(false);
-                liftHopThen(scoreHeight);
+                liftHopThen(plan.liftLate ? -1.0 : plan.height);
+                if (!plan.liftLate) liftStarted = true;
                 aimStop();
-                Vec gone = toField({mclPinX, mclPinY});
+                Vec gone = toField({pin->mclX, pin->mclY});
                 fieldMclPinPickedUp(gone.x, gone.y);   // MCL stops expecting a pin there
-                if (FP_USE_GOAL_TAG && goalTagId != NO_GOAL_TAG) aimAt(AimKind::goalTag, goalX, goalY, goalTagId);   // line up on the goal's tag
+                aimGoal();                             // line up on the goal's tag
+            }
+        }
+        if (grabbed && !liftStarted) {
+            const int index = std::min(std::max(static_cast<int>(done / FP_SAMPLE_STEP), 0), n - 1);
+            if (toGate[index] <= liftLead) {
+                liftStarted = true;
+                liftAfterHop(plan.height);
             }
         }
         return true;
@@ -1076,7 +1372,93 @@ bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, do
     aimStop();
     if (end == MoveEnd::timeUp) return false;
 
-    return letGo(settleMs, releaseMs, lowerBeforeOpenMs);
+    if (!grabbed) {   // the curve ended before the grab spot (stalled / timed out): close anyway
+        clawClose();
+        liftPress(false);
+        liftHopThen(plan.height);
+        liftStarted = true;
+    }
+    // The move ended before the lift was up (it met the goal early, or the lift is slower than FP_LIFT_UP_DPS): wait
+    // for it, so the pin is let go at its height and not into the side of the stack
+    if (!liftStarted) liftAfterHop(plan.height);
+    for (uint32_t t0 = pros::millis(); !(liftReady() && !fpTipping) && pros::millis() - t0 < static_cast<uint32_t>(FP_GATE_MAX_MS);) {
+        if (!waitMs(10)) return false;
+    }
+    return letGo(plan.settleMs, plan.releaseMs, plan.lowerBeforeOpenMs);
+}
+}  // namespace
+
+bool scoreWith(const std::vector<Node>& nodes, const ScorePlan& plan) { return runScore(nodes, nullptr, plan); }
+
+bool pickUpAndScoreWith(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY,
+                        int pinSlowMs, const ScorePlan& plan) {
+    PinPlan pin = {pinNode, pinX, pinY, mclPinX, mclPinY, pinSlowMs};
+    return runScore(nodes, &pin, plan);
+}
+
+bool pickUpAndScore(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY,
+                    double scoreHeight, double goalX, double goalY, int goalTagId, int pinSlowMs, int scoreSlowMs, int settleMs,
+                    int releaseMs, int lowerBeforeOpenMs) {
+    ScorePlan plan;
+    plan.height = scoreHeight;
+    plan.goalX = goalX;
+    plan.goalY = goalY;
+    plan.tagId = goalTagId;
+    plan.scoreSlowMs = scoreSlowMs;
+    plan.settleMs = settleMs;
+    plan.releaseMs = releaseMs;
+    plan.lowerBeforeOpenMs = lowerBeforeOpenMs;
+    return pickUpAndScoreWith(nodes, pinNode, pinX, pinY, mclPinX, mclPinY, pinSlowMs, plan);
+}
+
+bool scoreOnGoal(const std::vector<Node>& nodes, double scoreHeight, double goalX, double goalY, int goalTagId, int scoreSlowMs,
+                 int settleMs, int releaseMs, int lowerBeforeOpenMs) {
+    ScorePlan plan;
+    plan.height = scoreHeight;
+    plan.goalX = goalX;
+    plan.goalY = goalY;
+    plan.tagId = goalTagId;
+    plan.scoreSlowMs = scoreSlowMs;
+    plan.settleMs = settleMs;
+    plan.releaseMs = releaseMs;
+    plan.lowerBeforeOpenMs = lowerBeforeOpenMs;
+    return scoreWith(nodes, plan);
+}
+
+std::vector<Node> backArc(const Node& start, double straight, double arcIn, double noseTurnDeg) {
+    Node off = along(start, -straight);
+    if (arcIn <= 0.0 || std::fabs(noseTurnDeg) < 1.0) return {start, off};
+    const double turn = rad(std::fabs(noseTurnDeg)), radius = arcIn / turn;
+    const double back = radius * std::sin(turn), side = radius * (1.0 - std::cos(turn));
+    Vec f = forwardOf(start.heading), r = rightOf(start.heading);
+    // Backing up with the nose swinging clockwise, the robot ends up to its own LEFT of the line it started on
+    const double way = noseTurnDeg > 0 ? -1.0 : 1.0;
+    return {start, off, node(off.x - f.x * back + r.x * side * way, off.y - f.y * back + r.y * side * way, start.heading + noseTurnDeg)};
+}
+
+void endDash(double routeX, double routeY, double zoneRadius, int driveMs) {
+    if (!fpTimeUp) return;
+    const Vec zone = toField({routeX, routeY});
+    left_chassis.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);   // so what speed it has carries it on after the end
+    right_chassis.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
+    note("time up: dash for the zone");
+    while (elapsed() < fpLimitMs) {
+        const double dx = zone.x - x_pos, dy = zone.y - y_pos, dist = std::hypot(dx, dy);
+        if (dist <= zoneRadius * 0.5) break;   // well inside already
+        double off = wrap180(std::atan2(dx, dy) * 180.0 / FP_PI - getInertialHeading());   // + = the zone is right of the nose
+        const bool backwards = std::fabs(off) > 90.0;   // the back end is nearer to facing it: drive backwards
+        if (backwards) off = wrap180(off + 180.0);
+        // "Facing the zone" = pointing anywhere inside it (it's wide: this many degrees either side of its middle)
+        const double wide = dist > zoneRadius ? std::asin(zoneRadius / dist) * 180.0 / FP_PI : 90.0;
+        if (std::fabs(off) > wide && timeLeft() > driveMs) {
+            const double turn = off > 0 ? 12.0 : -12.0;
+            driveChassis(turn, -turn);
+        } else {
+            driveChassis(backwards ? -12.0 : 12.0, backwards ? -12.0 : 12.0);
+        }
+        pros::delay(5);
+    }
+    driveChassis(0.0, 0.0);
 }
 
 bool pickUp(const std::vector<Node>& nodes, int pinNode, double pinX, double pinY, double mclPinX, double mclPinY, double thenHeight,
@@ -1116,26 +1498,6 @@ bool pickUp(const std::vector<Node>& nodes, int pinNode, double pinX, double pin
         liftHopThen(thenHeight);
     }
     return end != MoveEnd::timeUp;
-}
-
-bool scoreOnGoal(const std::vector<Node>& nodes, double scoreHeight, double goalX, double goalY, int goalTagId, int scoreSlowMs,
-                 int settleMs, int releaseMs, int lowerBeforeOpenMs) {
-    Curve curve = makeCurve(nodes, false, FP_MAX_SPEED, 0.0);
-    addSlowdownAtEnd(curve, scoreSlowMs, FP_SCORE_SLOW_SPEED);
-    liftTo(scoreHeight);
-    if (FP_USE_GOAL_TAG && goalTagId != NO_GOAL_TAG) aimAt(AimKind::goalTag, goalX, goalY, goalTagId);
-    MoveOptions options;
-    options.gateBeforeEnd = FP_SCORE_GATE_IN;
-    options.gateHold = fpGateHold;
-    options.gateReady = []() { return liftReady() && !fpTipping; };
-    options.gateEta = [scoreHeight]() {
-        double climb = scoreHeight - FP_LIFT_READY_TOLERANCE - std::max(getDR4BPosition(), 0.0);
-        return std::max(climb, 0.0) / FP_LIFT_UP_DPS;
-    };
-    MoveEnd end = follow(curve, options);
-    aimStop();
-    if (end == MoveEnd::timeUp) return false;
-    return letGo(settleMs, releaseMs, lowerBeforeOpenMs);
 }
 
 void snapToGoal(double goalX, double goalY) {

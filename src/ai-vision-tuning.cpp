@@ -1,243 +1,346 @@
 // =====================================================================
-//   "AI VISION TUNING" auton (aiVisionTuningAuton)
+//   AI VISION TUNING: "Claw Cam" (port 5) and "Field Cam" (port 21)
 // =====================================================================
-// Sets the AI Vision sensor (AI_VISION_PORT, include/robot.hpp) up for the light it's in, then shows live what it
-// detects on the CONTROLLER screen and buzzes the controller for what it sees. Nothing moves. Never ends.
-// (This sensor only sees pins / cups with its AI model, not AprilTags.)
+// Picked on the controller like any auton (src/auton-select.cpp). The robot doesn't drive. Everything is on the
+// CONTROLLER screen; the PROS terminal gets one summary line a second. A = auto white balance for the light it's in
+// (PROS has no brightness / exposure setting for this sensor: white balance is the closest thing). It also runs by
+// itself at the start. Bench mode: hold B to stop.
 //
-// What it can tune (PROS has no brightness / contrast / exposure setting for this sensor, so it can't change those):
-//   1. White balance: runs the sensor's auto white balance in the current light (the closest thing to adjusting for
-//      a dark room). Re-run it any time with A (if the controller's buttons work in auton: under competition control
-//      / Timed Run they're usually off, so it also runs by itself at the start).
-//   2. Confidence: shows the scores the model gives what it sees, so you can set AI_VISION_MIN_SCORE a bit under
-//      what the real pins / cups get (cuts out false detections from glare or dark corners).
+// Both tools see what the AUTOS see: CUPS only (FP_CUP_CLASS_IDS; pins are ignored, the model finds them too badly),
+// with the autos' filters, and "sure" only when there is exactly one cup (boxes within FP_AIM_SAME_IN of each other at
+// about a foot are one cup). Two cups that disagree = the autos skip that frame. The model flickers, so the bearings
+// shown are averages over the last 2 s of sure frames.
 //
-// Rumble, each time what's in front of it changes to:
-//   a pin                 one short buzz
-//   a cup                 two short buzzes
-//   a stack (pin + cup)   one long buzz
-// "What's in front" = the biggest (closest) thing it sees. Pin / cup / stack come from the model's class names
-// (PIN_WORD / CUP_WORD / STACK_WORD below): a name with STACK_WORD, or with both words, is a stack. A pin and a cup
-// whose boxes overlap in the picture also count as a stack (in case the model sees the two separately).
+// CLAW CAM (AI_VISION_PORT, in the claw). The claw motor stays OFF: open the claw by hand first (the autos only read
+// this camera with the claw open, and closed its arms fill the picture).
+//   line 1  CUP / 2+ CUPS / no cup right now, and a = the cup's average bearing (degrees right of the robot's straight
+//           ahead, with FP_PIN_CAM_YAW). Centering check: a cup on the claw's center line should read about 0.
+//   line 2  sure% = frames with exactly one cup over the last 2 s, and the average / lowest cup score
+//           -> AI_VISION_MIN_SCORE (include/robot.hpp) a bit under the lowest score a real cup gets
+//   line 3  C = cups it uses now, pin = other things it sees (ignored), g = boxes centered in the gears / claw
+//           (FP_CLAW_CAM_MAX_CENTER_Y), x = cups further round than FP_AIM_AHEAD_DEG, m = AI_VISION_MIN_SCORE
+//   One short rumble when it becomes sure of a cup.
 //
-// Controller screen:
-//   line 1  what's in front: PIN / CUP / STACK, the model's name for it, its score, and where it is (L / M / R)
-//   line 2  over the last 2 s: how often it saw something, and the average / lowest score
-//   line 3  how many pins / cups / stacks are in view right now
-// The PROS terminal also gets one summary line a second.
+// FIELD CAM (GOAL_VISION_PORT, front-left corner of the chassis: tags + cups)
+//   line 1  the biggest AprilTag: its id, raw bearing (degrees right of the camera's own straight ahead) and distance
+//           from its size (GOAL_TAG_SIZE_IN)
+//   line 2  set YAW = the FP_GOAL_CAM_YAW that makes this tag read dead ahead of the robot IF the tag is placed dead
+//           ahead of the robot's center line, 36" from the tracking center (include/auton-core.hpp explains it),
+//           and sq = how square the tag faces the camera (the autos only trust >= FP_GOAL_TAG_MIN_SQUARENESS)
+//   line 3  cup check: put ONE cup dead ahead of the robot's center line, D inches from the tracking center
+//           (UP / DOWN change D in 6" steps, 12-36; it starts at 18 = 7.5" in front of the claw tip).
+//           +x.xin = how far right of that spot the camera puts it (0 = right), Y = the FP_GOAL_CAM_YAW that would make
+//           it 0. "2+" = more than one cup in view (the autos would skip), "--" = no cup this frame (average kept).
 // =====================================================================
+#include "auton-core.hpp"
+#include "auton-select.hpp"
+#include "pad.hpp"
 #include "robot.hpp"
 
 #include <algorithm>
-#include <cctype>
+#include <cmath>
 #include <cstdio>
-#include <optional>
-#include <string>
-#include <vector>
 
 #ifndef RW_SIM_PROS
 #include "pros/ai_vision.hpp"
 #endif
 
 namespace {
-// Words in the model's class names (any case) that say what a detection is
-const char* const PIN_WORD = "pin";
-const char* const CUP_WORD = "cup";
-const char* const STACK_WORD = "stack";
-
-constexpr int LOOP_MS = 50;              // the controller takes one print / rumble every 50 ms
+constexpr int READ_MS = 100;
 constexpr int AWB_WAIT_MS = 1500;        // white balance settling time
-constexpr int WINDOW_FRAMES = 20;        // 2 s of readings (one every 100 ms)
-constexpr int RUMBLE_GAP_MS = 700;       // at most one buzz pattern this often
+constexpr int WINDOW_FRAMES = 20;        // 2 s of readings
+constexpr int RUMBLE_GAP_MS = 700;       // at most one buzz this often
+constexpr double CUP_CHECK_IN = 18.0;    // field cam cup check: the cup this far straight ahead of the tracking center to
+                                         // start with. The front of the claw's flex wheels is 8.6" ahead of the tracking
+                                         // center (measured 2026-11-23), so D = 18 / 30 / 36 is 9.4 / 21.4 / 27.4" in
+                                         // front of the flex wheels
 
-enum class Kind { none, pin, cup, stack, other };
-const char* kindName(Kind kind) {
-    switch (kind) {
-        case Kind::pin: return "PIN";
-        case Kind::cup: return "CUP";
-        case Kind::stack: return "STACK";
-        case Kind::other: return "?";
-        default: return "-";
+// Degrees right of the camera's own straight ahead for a picture column (the same math as the autos' aiming)
+double focalPx() { return (ac::FP_CAM_WIDTH_PX / 2.0) / std::tan(ac::rad(ac::FP_CAM_FOV_DEG / 2.0)); }
+double columnDeg(double centerPx, double tiltDeg) {
+    double tanAcross = (centerPx - ac::FP_CAM_WIDTH_PX / 2.0) / focalPx();
+    tanAcross /= std::cos(ac::rad(tiltDeg));
+    return std::atan(tanAcross) * 180.0 / ac::FP_PI;
+}
+// Two cup boxes closer together than this (degrees) are one cup: FP_AIM_SAME_IN at about a foot
+double sameDeg() { return std::atan(ac::FP_AIM_SAME_IN / 12.0) * 180.0 / ac::FP_PI; }
+
+// The cups one camera sees in one frame, filtered the way the autos filter them (cameraSighting in auton-core.cpp)
+struct CupLook {
+    int cups = 0;         // cups the autos would use
+    int pins = 0;         // anything that isn't a cup: ignored
+    int gears = 0;        // claw camera: boxes centered in the gears / claw
+    int aside = 0;        // claw camera: cups further round than FP_AIM_AHEAD_DEG
+    int weak = 0;         // cups under AI_VISION_MIN_SCORE
+    int bestScore = -1;   // best cup score this frame, weak ones included (for setting AI_VISION_MIN_SCORE)
+    double low = 1e9, high = -1e9, sum = 0;   // raw bearings of the cups used (degrees right of the camera's straight ahead)
+    bool sure() const { return cups > 0 && high - low <= sameDeg(); }
+    double raw() const { return cups > 0 ? sum / cups : 0.0; }
+};
+
+// The last 2 s of frames: how often it was sure, the average raw bearing of the sure frames, cup scores
+struct Window {
+    bool sure[WINDOW_FRAMES] = {};
+    double raw[WINDOW_FRAMES] = {};
+    int score[WINDOW_FRAMES] = {};
+    int frame = 0;
+    Window() { std::fill(score, score + WINDOW_FRAMES, -1); }
+    void add(const CupLook& look) {
+        sure[frame] = look.sure();
+        raw[frame] = look.raw();
+        score[frame] = look.bestScore;
+        frame = (frame + 1) % WINDOW_FRAMES;
     }
-}
-const char* kindRumble(Kind kind) {
-    switch (kind) {
-        case Kind::pin: return ".";      // once
-        case Kind::cup: return ". .";    // twice
-        case Kind::stack: return "-";    // long
-        default: return nullptr;
+    int surePercent() const { return static_cast<int>(std::count(sure, sure + WINDOW_FRAMES, true)) * 100 / WINDOW_FRAMES; }
+    bool averageRaw(double& out) const {
+        double total = 0;
+        int n = 0;
+        for (int f = 0; f < WINDOW_FRAMES; f++) {
+            if (!sure[f]) continue;
+            total += raw[f];
+            n++;
+        }
+        if (n == 0) return false;
+        out = total / n;
+        return true;
     }
+    bool scores(int& average, int& lowest) const {
+        int total = 0, n = 0;
+        lowest = 1000;
+        for (int s : score) {
+            if (s < 0) continue;
+            total += s;
+            n++;
+            lowest = std::min(lowest, s);
+        }
+        if (n == 0) return false;
+        average = total / n;
+        return true;
+    }
+};
+
+// One short rumble when it becomes sure of a cup: it has to stay sure 300 ms, and it only counts as gone after 1 s
+// with no sure frame (the model drops out for a frame or two all the time)
+struct Buzz {
+    bool on = false;
+    uint32_t sureSince = 0, lastSureMs = 0, lastRumbleMs = 0;
+    void update(bool sure, uint32_t now) {
+        if (sure) {
+            if (now - lastSureMs > 200) sureSince = now;   // a new run of sure frames
+            lastSureMs = now;
+            if (!on && now - sureSince >= 300) {
+                on = true;
+                if (now - lastRumbleMs >= static_cast<uint32_t>(RUMBLE_GAP_MS)) {
+                    pad::rumble(".");
+                    lastRumbleMs = now;
+                }
+            }
+        } else if (now - lastSureMs >= 1000) {
+            on = false;
+        }
+    }
+};
+
+#ifndef RW_SIM_PROS
+void whiteBalance(pros::AIVision& camera, const char* title) {
+    pad::lines(title, "WHITE BALANCE...", "");
+    camera.start_awb();
+    pros::delay(AWB_WAIT_MS);
+    std::printf("%s: white balance done\n", title);
 }
-bool hasWord(std::string name, const char* word) {
-    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
-    return name.find(word) != std::string::npos;
+
+bool cameraMissing(int32_t count, int port, const char* title) {
+    if (count != PROS_ERR && count >= 0 && count <= 64) return false;
+    pad::lines(title, "NOT CONNECTED", "");
+    pad::line(2, "check port %d", port);
+    return true;
 }
-Kind kindFromName(const std::string& name) {
-    bool pin = hasWord(name, PIN_WORD), cup = hasWord(name, CUP_WORD);
-    if (hasWord(name, STACK_WORD) || (pin && cup)) return Kind::stack;
-    if (cup) return Kind::cup;
-    if (pin) return Kind::pin;
-    return Kind::other;
+
+CupLook lookForCups(pros::AIVision& camera, bool clawCam, int32_t count) {
+    CupLook look;
+    for (int32_t i = 0; i < count; i++) {
+        pros::AIVision::Object object = camera.get_object(i);
+        if (!(object.type & pros::E_AIVISION_DETECTED_OBJECT)) continue;
+        const auto& box = object.object.element;
+        if (clawCam && box.yoffset + box.height / 2 >= ac::FP_CLAW_CAM_MAX_CENTER_Y) {
+            look.gears++;
+            continue;
+        }
+        if (!ac::isCupClass(object.id)) {
+            look.pins++;
+            continue;
+        }
+        double center = box.xoffset + box.width / 2.0;
+        if (clawCam ? ac::FP_PIN_CAM_UPSIDE_DOWN : ac::FP_GOAL_CAM_UPSIDE_DOWN) center = ac::FP_CAM_WIDTH_PX - center;
+        const double raw = columnDeg(center, clawCam ? ac::FP_PIN_CAM_TILT_DEG : 0.0);
+        if (clawCam && std::fabs(raw + ac::FP_PIN_CAM_YAW) > ac::FP_AIM_AHEAD_DEG) {
+            look.aside++;
+            continue;
+        }
+        look.bestScore = std::max(look.bestScore, static_cast<int>(box.score));
+        if (box.score < AI_VISION_MIN_SCORE) {
+            look.weak++;
+            continue;
+        }
+        look.cups++;
+        look.low = std::min(look.low, raw);
+        look.high = std::max(look.high, raw);
+        look.sum += raw;
+    }
+    return look;
+}
+
+// "CUP" (sure), "2+" (cups that disagree: the autos skip), "--" (no usable cup this frame)
+const char* cupState(const CupLook& look) { return look.sure() ? "CUP" : (look.cups > 1 ? "2+" : "--"); }
+#endif
+
+void ownTheController(const char* name) {
+    ac::setRouteFrame(false, false);
+    ac::coreStart(name, 3600000);
+    ac::showStatusOnController(false);
 }
 }  // namespace
 
-void aiVisionTuningAuton() {
+// =====================================================================
+//   CLAW CAM
+// =====================================================================
+void tuneClawCam() {
+    ownTheController("claw cam");
 #ifdef RW_SIM_PROS
-    std::printf("AI Vision Tuning: the simulator has no AI Vision sensor\n");
+    std::printf("Claw Cam: the simulator has no AI Vision sensor\n");
 #else
+    const char* title = "CLAW CAM";
     pros::AIVision camera(AI_VISION_PORT);
-    pros::Controller& pad = controller_1;
     camera.enable_detection_types(pros::AivisionModeType::objects);
+    // The claw motor is left OFF (so it can't overheat): open the claw by hand before testing, like the autos read it
+    claw.move_voltage(0);
+    whiteBalance(camera, title);
 
-    auto whiteBalance = [&]() {
-        pad.clear();
-        pros::delay(LOOP_MS);
-        pad.print(0, 0, "WHITE BALANCE...");
-        camera.start_awb();
-        pros::delay(AWB_WAIT_MS);
-        std::printf("AI Vision Tuning: white balance done\n");
-    };
-    whiteBalance();
-
-    std::vector<std::string> classNames;
-    auto className = [&](int id) -> std::string {
-        if (classNames.empty()) {
-            char scratch[32] = {0};
-            int32_t count = camera.get_class_name(-1, scratch);   // -1 = how many class names the model has
-            for (int i = 0; i < count && i < 32; i++) {
-                std::optional<std::string> name = camera.get_class_name(i);
-                if (!name) { classNames.clear(); break; }
-                classNames.push_back(*name);
-            }
-        }
-        if (id >= 0 && id < static_cast<int>(classNames.size())) return classNames[id];
-        return "obj#" + std::to_string(id);
-    };
-
-    // Last 2 s: did it see something, and the best score that frame
-    bool hit[WINDOW_FRAMES] = {};
-    int score[WINDOW_FRAMES] = {};
-    int frame = 0;
-
-    char lines[3][20] = {"", "", ""};
-    int nextLine = 0;
-    Kind inFront = Kind::none;      // what was in front last reading
-    const char* rumbleWant = nullptr;
-    uint32_t lastRumbleMs = 0, lastLogMs = 0;
-    bool readThisLoop = false;
-
-    struct Seen { Kind kind; std::string name; int score; double left, right, top, bottom; };
-
-    while (true) {
-        uint32_t now = pros::millis();
-        if (pad.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
-            whiteBalance();
+    Window window;
+    Buzz buzz;
+    uint32_t lastLogMs = 0;
+    while (!tuneExitWanted()) {
+        if (controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) whiteBalance(camera, title);
+        const uint32_t now = pros::millis();
+        const int32_t count = camera.get_object_count();
+        if (cameraMissing(count, AI_VISION_PORT, title)) {
+            pros::delay(READ_MS);
             continue;
         }
+        const CupLook look = lookForCups(camera, true, count);
+        window.add(look);
+        buzz.update(look.sure(), now);
 
-        readThisLoop = !readThisLoop;   // the sensor every 100 ms, the controller every 50 ms
-        if (readThisLoop) {
-            int32_t count = camera.get_object_count();
-            if (count == PROS_ERR || count < 0 || count > 64) {
-                std::snprintf(lines[0], sizeof(lines[0]), "NO AI VISION P%d", AI_VISION_PORT);
-                std::snprintf(lines[1], sizeof(lines[1]), "check the port");
-                std::snprintf(lines[2], sizeof(lines[2]), " ");
-            } else {
-                std::vector<Seen> seen;
-                for (int32_t i = 0; i < count; i++) {
-                    pros::AIVision::Object object = camera.get_object(i);
-                    if (!(object.type & pros::E_AIVISION_DETECTED_OBJECT)) continue;
-                    const auto& box = object.object.element;
-                    std::string name = className(object.id);
-                    seen.push_back({kindFromName(name), name, box.score, static_cast<double>(box.xoffset),
-                                    static_cast<double>(box.xoffset + box.width), static_cast<double>(box.yoffset),
-                                    static_cast<double>(box.yoffset + box.height)});
-                }
-                // A pin and a cup whose boxes overlap = one stack (the model saw the two parts separately)
-                for (size_t a = 0; a < seen.size(); a++) {
-                    for (size_t b = a + 1; b < seen.size(); b++) {
-                        bool pinCup = (seen[a].kind == Kind::pin && seen[b].kind == Kind::cup) ||
-                                      (seen[a].kind == Kind::cup && seen[b].kind == Kind::pin);
-                        bool overlap = seen[a].left < seen[b].right && seen[b].left < seen[a].right &&
-                                       seen[a].top < seen[b].bottom && seen[b].top < seen[a].bottom;
-                        if (pinCup && overlap) {
-                            seen[a].kind = Kind::stack;
-                            seen[a].left = std::min(seen[a].left, seen[b].left);
-                            seen[a].right = std::max(seen[a].right, seen[b].right);
-                            seen[a].top = std::min(seen[a].top, seen[b].top);
-                            seen[a].bottom = std::max(seen[a].bottom, seen[b].bottom);
-                            seen[a].score = std::max(seen[a].score, seen[b].score);
-                            seen[a].name += "+" + seen[b].name;
-                            seen.erase(seen.begin() + b);
-                            b--;
-                        }
-                    }
-                }
+        double averageRaw = 0;
+        const bool haveAverage = window.averageRaw(averageRaw);
+        const double average = averageRaw + ac::FP_PIN_CAM_YAW;
+        if (haveAverage) pad::line(0, "%-3s %3d a%+.1fd", cupState(look), look.bestScore, average);
+        else pad::line(0, "%-3s no cup yet", cupState(look));
+        int averageScore = 0, lowestScore = 0;
+        if (window.scores(averageScore, lowestScore)) pad::line(1, "sure%3d%% av%d lo%d", window.surePercent(), averageScore, lowestScore);
+        else pad::line(1, "sure  0%% no cups");
+        pad::line(2, "C%d pin%d g%d x%d m%d", look.cups, look.pins, look.gears, look.aside, AI_VISION_MIN_SCORE);
 
-                // What's in front: the biggest box (closest)
-                int front = -1;
-                double biggest = -1;
-                int pins = 0, cups = 0, stacks = 0, bestScore = -1;
-                for (size_t i = 0; i < seen.size(); i++) {
-                    double area = (seen[i].right - seen[i].left) * (seen[i].bottom - seen[i].top);
-                    if (area > biggest) { biggest = area; front = static_cast<int>(i); }
-                    if (seen[i].kind == Kind::pin) pins++;
-                    if (seen[i].kind == Kind::cup) cups++;
-                    if (seen[i].kind == Kind::stack) stacks++;
-                    bestScore = std::max(bestScore, seen[i].score);
-                }
-                Kind nowFront = front >= 0 ? seen[front].kind : Kind::none;
+        if (now - lastLogMs >= 1000) {
+            lastLogMs = now;
+            std::printf("Claw Cam: %s, cups %d (weak %d), pins %d, gears %d, aside %d, sure %d%% of 2 s, average bearing %+.2f deg\n",
+                        cupState(look), look.cups, look.weak, look.pins, look.gears, look.aside, window.surePercent(),
+                        haveAverage ? average : 0.0);
+        }
+        pros::delay(READ_MS);
+    }
+#endif
+}
 
-                // Line 1: what's in front
-                if (front >= 0) {
-                    double center = (seen[front].left + seen[front].right) / 2.0;
-                    char side = center < 107 ? 'L' : (center > 213 ? 'R' : 'M');
-                    std::snprintf(lines[0], sizeof(lines[0]), "%-5s %-7.7s%3d %c", kindName(nowFront), seen[front].name.c_str(),
-                                  seen[front].score, side);
-                } else {
-                    std::snprintf(lines[0], sizeof(lines[0]), "nothing seen");
-                }
+// =====================================================================
+//   FIELD CAM
+// =====================================================================
+void tuneFieldCam() {
+    ownTheController("field cam");
+#ifdef RW_SIM_PROS
+    std::printf("Field Cam: the simulator has no AI Vision sensor\n");
+#else
+    const char* title = "FIELD CAM";
+    pros::AIVision camera(GOAL_VISION_PORT);
+    camera.enable_detection_types(pros::AivisionModeType::objects, pros::AivisionModeType::tags);
+    whiteBalance(camera, title);
+    // The bearing a tag dead ahead of the robot, 36" from the tracking center, has from this camera
+    const double shouldDeg = std::atan2(-ac::FP_GOAL_CAM_RIGHT, 36.0 - ac::FP_GOAL_CAM_FORWARD) * 180.0 / ac::FP_PI;
+    double checkIn = CUP_CHECK_IN;   // the cup check's distance (UP / DOWN)
+    Window window;
+    Buzz buzz;
+    uint32_t lastLogMs = 0;
 
-                // Line 2: the last 2 s
-                hit[frame] = bestScore >= 0;
-                score[frame] = bestScore;
-                frame = (frame + 1) % WINDOW_FRAMES;
-                int hits = 0, sum = 0, low = 1000000;
-                for (int f = 0; f < WINDOW_FRAMES; f++) {
-                    if (!hit[f]) continue;
-                    hits++;
-                    sum += score[f];
-                    low = std::min(low, score[f]);
-                }
-                if (hits > 0) std::snprintf(lines[1], sizeof(lines[1]), "%3d%% av%d lo%d", hits * 100 / WINDOW_FRAMES, sum / hits, low);
-                else std::snprintf(lines[1], sizeof(lines[1]), "  0%% in last 2s");
-
-                // Line 3: counts
-                std::snprintf(lines[2], sizeof(lines[2]), "P%d C%d S%d", pins, cups, stacks);
-
-                // Buzz when what's in front changes to a pin / cup / stack
-                if (nowFront != inFront && kindRumble(nowFront) != nullptr) rumbleWant = kindRumble(nowFront);
-                inFront = nowFront;
-
-                if (now - lastLogMs >= 1000) {
-                    lastLogMs = now;
-                    std::printf("AI Vision Tuning: front %s (%s, score %d), pins %d cups %d stacks %d, seen %d%% of last 2 s\n",
-                                kindName(nowFront), front >= 0 ? seen[front].name.c_str() : "-", front >= 0 ? seen[front].score : -1,
-                                pins, cups, stacks, hits * 100 / WINDOW_FRAMES);
-                }
+    while (!tuneExitWanted()) {
+        if (controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) whiteBalance(camera, title);
+        if (controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_UP)) checkIn = std::min(checkIn + 6.0, 36.0);
+        if (controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_DOWN)) checkIn = std::max(checkIn - 6.0, 12.0);
+        // A cup dead ahead, checkIn from the tracking center: the bearing it should have from this camera, and how far it is
+        const double cupShouldDeg = std::atan2(-ac::FP_GOAL_CAM_RIGHT, checkIn - ac::FP_GOAL_CAM_FORWARD) * 180.0 / ac::FP_PI;
+        const double cupReach = std::hypot(ac::FP_GOAL_CAM_RIGHT, checkIn - ac::FP_GOAL_CAM_FORWARD);
+        const uint32_t now = pros::millis();
+        const int32_t count = camera.get_object_count();
+        if (cameraMissing(count, GOAL_VISION_PORT, title)) {
+            pros::delay(READ_MS);
+            continue;
+        }
+        int tagId = -1;
+        double tagTall = 0, tagWide = 0, tagCenter = 0, tagSize = 0;
+        for (int32_t i = 0; i < count; i++) {
+            pros::AIVision::Object seen = camera.get_object(i);
+            if (!(seen.type & pros::E_AIVISION_DETECTED_TAG)) continue;
+            const auto& t = seen.object.tag;
+            // The pair of edges that runs across the picture and the pair that runs up it (as the autos do)
+            const double e01 = std::hypot(t.x1 - t.x0, t.y1 - t.y0), e12 = std::hypot(t.x2 - t.x1, t.y2 - t.y1);
+            const double e23 = std::hypot(t.x3 - t.x2, t.y3 - t.y2), e30 = std::hypot(t.x0 - t.x3, t.y0 - t.y3);
+            const bool firstPairAcross = std::abs(t.x1 - t.x0) + std::abs(t.x3 - t.x2) >= std::abs(t.y1 - t.y0) + std::abs(t.y3 - t.y2);
+            const double wide = firstPairAcross ? (e01 + e23) / 2.0 : (e12 + e30) / 2.0;
+            const double tall = firstPairAcross ? (e12 + e30) / 2.0 : (e01 + e23) / 2.0;
+            if (tall > tagTall) {
+                tagId = seen.id;
+                tagTall = tall;
+                tagWide = wide;
+                tagCenter = (t.x0 + t.x1 + t.x2 + t.x3) / 4.0;
+                tagSize = std::max({e01, e12, e23, e30});
             }
         }
-
-        // One controller write per loop: a waiting buzz first, otherwise the next screen line
-        if (rumbleWant != nullptr && now - lastRumbleMs >= static_cast<uint32_t>(RUMBLE_GAP_MS)) {
-            pad.rumble(rumbleWant);
-            rumbleWant = nullptr;
-            lastRumbleMs = now;
+        if (ac::FP_GOAL_CAM_UPSIDE_DOWN) tagCenter = ac::FP_CAM_WIDTH_PX - tagCenter;
+        double rawDeg = 0, squareness = 0;
+        if (tagId >= 0) {
+            rawDeg = columnDeg(tagCenter, 0.0);
+            squareness = std::min(tagWide / std::max(tagTall, 1.0), 1.0);
+            const double inches = tagSize > 0.5 ? focalPx() * GOAL_TAG_SIZE_IN / tagSize : 0.0;
+            pad::line(0, "TAG%d %+.1fd %.0fin", tagId, rawDeg, inches);
+            pad::line(1, "set YAW %.1f sq%.2f", shouldDeg - rawDeg, squareness);
         } else {
-            pad.print(nextLine, 0, "%-18s", lines[nextLine]);
-            nextLine = (nextLine + 1) % 3;
+            pad::line(0, "no tag");
+            pad::line(1, "YAW now %.1f", ac::FP_GOAL_CAM_YAW);
         }
-        pros::delay(LOOP_MS);
+
+        const CupLook look = lookForCups(camera, false, count);
+        window.add(look);
+        buzz.update(look.sure(), now);
+        double cupRaw = 0;
+        const bool haveCup = window.averageRaw(cupRaw);
+        const double cupOff = cupReach * std::tan(ac::rad(cupRaw + ac::FP_GOAL_CAM_YAW - cupShouldDeg));
+        if (haveCup) pad::line(2, "%.0f %-3s%+.1f Y%.1f", checkIn, cupState(look), cupOff, cupShouldDeg - cupRaw);
+        else pad::line(2, "%.0f %-3s no cup yet", checkIn, cupState(look));
+
+        if (now - lastLogMs >= 1000) {
+            lastLogMs = now;
+            if (tagId >= 0) {
+                std::printf("Field Cam: tag %d raw %+.2f deg, squareness %.2f, %.0f px tall -> FP_GOAL_CAM_YAW %.2f if it's dead ahead at 36\"\n",
+                            tagId, rawDeg, squareness, tagTall, shouldDeg - rawDeg);
+            }
+            std::printf("Field Cam: cups %s (%d, pins %d, weak %d), sure %d%% of 2 s", cupState(look), look.cups, look.pins, look.weak,
+                        window.surePercent());
+            if (haveCup) {
+                std::printf(", raw %+.2f deg, cup %+.2f in right of the spot %.0f\" ahead -> FP_GOAL_CAM_YAW %.2f", cupRaw, cupOff, checkIn,
+                            cupShouldDeg - cupRaw);
+            }
+            std::printf("\n");
+        }
+        pros::delay(READ_MS);
     }
 #endif
 }

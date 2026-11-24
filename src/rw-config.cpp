@@ -100,11 +100,11 @@ double vertical_tracker_diameter = 2.01258746176;   // ODOM_VERTICAL_DIAMETER (t
 //      (front / right / back / left). Set their ports above.
 //   2. Fill in each sensor's offset below: where the FACE of the sensor is, measured from the robot's center
 //      (9" from the back, centered side to side). X: + = right of center, - = left. Y: + = in front, - = behind.
-//   3. Run "Sensor Check" on the auton selector with the robot a tape-measured distance (2-4 ft) from a wall.
+//   3. Run "Sensors + MCL" (picked on the controller) with the robot a tape-measured distance (2-4 ft) from a wall.
 //      If the reading is a little off, set distance_sensor_scale = (tape measure) / (reading).
-//   4. use_distance_resets = true. Run "Sensor Check" again from the skills start spot: X / Y should match
-//      the real spot, and "rst" should count up.
-//   5. use_mcl = true. The selector screen shows "MCL <spread>in <time>ms": spread should stay small (under ~2")
+//   4. use_distance_resets = true. Run "Sensors + MCL" again from the skills start spot (A = a reset): X / Y should match
+//      the real spot, and "r" should show how many sensors reset it.
+//   5. use_mcl = true. "Sensors + MCL" shows the MCL spread ("s") on the controller: spread should stay small (under ~2")
 //      and time under a few ms (lower mcl_particles if it isn't). If the position lags while driving toward
 //      or away from a wall, adjust distance_sensor_delay_msec (further down).
 // Both are off until the sensors are on: with nothing plugged in they'd just do nothing.
@@ -167,8 +167,9 @@ double chase_power = 2;
 
 // Multiplies the IMU heading. Many V5 IMUs read a little off over full turns (e.g. 357 for 360).
 // Find yours with measureImuScale(), 1.0 = no correction
-// TODO: measure with measureImuScale() once it's running on RW (an earlier spin test hinted yours may read off)
-double imu_scale = 1.0023;
+// Measured 2026-11-23 with the "IMU Scale" tool, 10 turns by hand, 3 runs: 1.00315 / 1.00453 / 1.00387 -> average
+// (was 1.0023)
+double imu_scale = 1.00385;
 
 // End a motion early once the robot has been stuck (not moving or turning) for this long, in msec.
 // Saves time if the robot gets caught on something. 0 = off.
@@ -192,7 +193,7 @@ double distance_reset_corner_margin = 18;
 // MCL (see startMcl() in src/rw-user.cpp): particle count (more = smoother but slower, up to 1000),
 // longest distance reading it trusts (inches), and how far behind the distance sensor readings are (msec).
 // If the position lags while driving toward or away from a wall, adjust the delay.
-// The selector screen shows how long each MCL update takes; lower the particle count if it's more than a few msec
+// The brain screen shows how long each MCL update takes; lower the particle count if it's more than a few msec
 int mcl_particles = 200;
 double mcl_max_range = 60;
 double distance_sensor_delay_msec = 40;

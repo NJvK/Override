@@ -79,6 +79,10 @@ int localizeWithWalls();
 // Field-aware MCL (src/field-mcl.cpp): RW's particle filter, but only trusting distance readings with nothing on the
 // field in the beam before the wall. Started by runPreAutonomous() when use_mcl is on (instead of RW's startMcl()).
 void startFieldMcl();
+// true = MCL keeps following odometry but stops correcting it (the drive tuning tests run anywhere on the field, where
+// the walls aren't where MCL thinks). false = correcting again, starting over from the current position.
+// coreStart() always turns it back on.
+void pauseFieldMcl(bool paused);
 // Tells it a field pin at (x, y) is gone (picked up), so beams past that spot count again
 void fieldMclPinPickedUp(double x, double y);
 // One-shot reset while stopped with the field-aware checks (works next to the loaders, unlike localizeWithWalls).
