@@ -50,13 +50,6 @@ std::atomic<int> picked{0}; //do this for default skills
 // std::atomic<int> picked{1}; //do this for default quals
 std::atomic<bool> driverActive{false};    // driver control has started
 std::atomic<bool> resultsUp{false};       // an auton's results are on the controller: the selector waits for an arrow
-std::atomic<bool> benchRunning{false};    // bench mode (no field control): a routine started with Y is running
-// Field control / a competition switch has been seen since the program started: bench mode is off until a restart,
-// so a loose field cable mid-match can never let Y start an auton
-std::atomic<bool> everConnected{false};
-
-void benchLine0() { pad::line(0, "%s Y=run", ROUTINES[picked].name); }   // names are 13 characters at most
-
 bool connected() { return pros::competition::is_connected(); }
 bool autonNow() { return connected() && pros::competition::is_autonomous() && !pros::competition::is_disabled(); }
 // Only with field control / a competition switch, and only while disabled
@@ -89,7 +82,6 @@ void selectorLoop() {
     bool wasPicking = false;
     uint32_t lastDraw = 0;
     while (true) {
-        if (connected()) everConnected = true;
         const bool picking = canPick();
         if (picking) {
             if (!wasPicking) {
@@ -154,48 +146,14 @@ void runSelectedRoutine() {
 void driverStarting() {
     resultsUp = false;   // driver readouts take lines 1 and 2; disabled again after the match = the selector
     driverActive = true;
-    // Plain program run: the selector never shows, so line 0 says what an auton would run
-    if (connected()) everConnected = true;
-    if (!everConnected) benchLine0();   // bench mode (benchRunWanted below): LEFT / RIGHT pick, Y runs
-}
-
-// =====================================================================
-//   BENCH MODE: no field control / competition switch (plain program run)
-// =====================================================================
-// In driver control, LEFT / RIGHT pick (line 0), Y runs the pick right there. A tuning tool runs until B is held;
-// a match auton runs to its end (nothing stops it but stopping the program). Its results stay on the controller
-// until an arrow is pressed (that press only brings the driver readouts back).
-bool benchRunWanted() {
-    if (connected()) everConnected = true;
-    if (everConnected) return false;   // ever on field control / a switch since the start: never (restart to use it)
-    const bool left = controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_LEFT);
-    const bool right = controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_RIGHT);
-    const bool run = controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y);
-    if (resultsUp) {
-        if (left || right) {
-            resultsUp = false;   // back to the driver readouts, pick unchanged
-            benchLine0();
-        }
-    } else if (left != right) {
-        picked = (picked + (right ? 1 : COUNT - 1)) % COUNT;
-        save();
-        pad::rumble(".");
-        benchLine0();
-    }
-    if (run) benchRunning = true;
-    return run;
-}
-
-void benchFinished() {
-    benchRunning = false;
-    controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y);   // presses made during the run don't count
-    controller_1.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B);
+    // Plain program run (no field control / competition switch): no auton runs. Line 0 says what one would run.
+    if (!connected()) pad::line(0, "%s (no sw)", ROUTINES[picked].name);   // names are 13 characters at most
 }
 
 bool driverScreenOn() {
-    if (benchRunning || (!connected() && resultsUp)) return false;   // a bench run / its results have the screen
+    if (!connected() && resultsUp) return false;   // an auton's results have the screen
     return driverActive && !autonNow() && !(connected() && pros::competition::is_disabled());
 }
 
-// With field control / a switch, tools run until autonomous ends. In bench mode, holding B ends them.
-bool tuneExitWanted() { return benchRunning && controller_1.get_digital(pros::E_CONTROLLER_DIGITAL_B); }
+// Tools run until autonomous ends (field control / a competition switch only: there is no bench mode any more)
+bool tuneExitWanted() { return false; }

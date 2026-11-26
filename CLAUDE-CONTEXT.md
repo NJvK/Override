@@ -49,3 +49,52 @@ Paste this to start: "Read CLAUDE-CONTEXT.md in OverrideNewRW and continue from 
 4. Feedforward / Drive / Spin / Curve tests once the middle left drive motor (port 1, removed for now) is back, on VEX tiles.
 5. Optional: more Vision Pickup runs. The user saw good pickups straight ahead, and misses about 2" sideways / early closes when the cup is more than 4" off-center. In the autos, distance comes from odometry, so that's expected to be much better.
 6. Commit the session's changes when the user asks (not committed yet).
+
+## Done in the 2026-11-24 session (built + simulated, NOT run on the robot, not committed)
+- **Stop before scoring fixed** (`runScore` in auton-core.cpp): it waited up to `FP_GATE_MAX_MS` (1.5 s) at a goal for the
+  lift to get within 15 deg of its height, then let go anyway. Now `liftUpOrStuck()`: it scores as soon as the lift is
+  there OR has stopped climbing (rose < `FP_LIFT_RISE_DEG` 2 deg in `FP_LIFT_STUCK_MS` 120 ms). The lift gate on the
+  way in uses the same test (no 8 in/s creep behind a lift that topped out). The terminal prints
+  "lift stopped at X (wanted Y)" when that happens: tells which height in main.cpp `ALLIANCE_HEIGHTS` the lift can't reach.
+- **New skills ending** (`middleGoalFinish` in skills.cpp, settings `SK_MID_*`, switch `SK_MIDDLE_GOAL_FINISH`):
+  toggle -> 8" forward -> spin to 205 -> back into the red cluster pin (tip 17,-23.55, heading 228, 4" in, same as the
+  4-pin) with the intake, no dwell (`SK_MID_PIN_DWELL_MS` 0) -> curve out to (8,-41) -> spin to 30 -> up between the small red
+  pin (0,-23.55) and the cluster into the middle goal at heading 328, lift at spot 3, claw opens 8" before -> flipper
+  1 s -> back off to 17" from the goal + 35 deg swing -> between the middle goal and the small blue pin (23.55,0) ->
+  yellow stack (23.55,23.55) at heading 35 -> round it -> middle goal at heading 215, lift at spot 4 -> stops there
+  holding it (`ScorePlan::release = false`; no end dash once it goes for the stack).
+- Time guard: middle goal only if `SK_SIM_MID_FLIP_MS` (6.2 s) fits after the toggle, the stack only if
+  `SK_SIM_MID_STACK_MS` (3.8 s, no spare) fits after the flip; otherwise it parks / stays at the goal.
+- Clearances were planned with a 15" chassis (16.5" at the gears), pins 1.3" radius, goal base 3.5" radius. Tightest in
+  the sim: ~0.3-0.6" past the small red pin at the back-off, ~1.5" past it on the way in, ~1.8" past the small blue pin.
+- Follow-up same day: the user asked to curve straight from the cluster pin into the middle goal (no drive-then-turn).
+  Checked: turning right at/after the pin sweeps the front into the small red pin (0,-23.55) (pivot at the pin = ~0.2"
+  clearance), a left loop hits the cluster, a loop round the left of the small pin = ~0.5" and enters the goal from the
+  lower left (stack trip much longer). Kept out + turn (shortened). Added `ScorePlan::liftNotBeforeMs`: the lift stays
+  down until 1.5 s (`SK_MID_FEED_MS`) after the pin so the intake can feed the flipper. Waiting on the user's answer.
+- Then the user said knocking the small red pin over is fine, but with the robot's SIDE while curving into the cluster
+  pin (not the back: it would jam the intake), and to curve straight from the cluster pin into the middle goal. Done:
+  10" off the toggle, spin to 190, back through (8,-30) heading 205 and swing into the cluster pin at heading 242 (3" in);
+  the swing sweeps the right side (3-6" ahead of center, the gear step) across the small pin ~3" before the cluster pin,
+  planned to still be the side with 1"/3 deg error. Then one forward curve into the middle goal at heading 336 (tangent 12),
+  lift held down 1.5 s after the pin. Sim: pin 51.8 s, flipped 55.9 s, stack then doesn't fit in the sim (needs 3.9 s).
+  Scratchpad planners (plan.py, knock.py, robust2.py) did the clearance/contact checks; they're temporary.
+
+## 2026-11-25: lift bottom hold (built, NOT tested on the robot, not committed)
+- Problem: at the bottom the lift rose ~0.5" (motors off in the 0-10 deg deadzone, bands pull it up), and holding L2
+  there jiggled (`move_velocity(0)` fighting the bands).
+- Fix in main.cpp: `bottomHoldVoltage()` presses it onto the hard stop (1200 mV + 200 mV/deg, max 4000;
+  `DR4B_BOTTOM_HOLD_*`). Used by the PID task's bottom deadzone, by L2 at the bottom, and after the stall zero.
+  Letting go of L2 at the bottom skips the 250 ms brake/settle and sets target 0 straight away.
+- Robot test: jiggle gone. The "L 13.7 / 26.8" the user saw was the LEFT DISTANCE SENSOR (CONTROLLER_READOUT was 3),
+  not the lift. A 30 deg L2 re-zero added because of that was reverted. CONTROLLER_READOUT set to 0 (lift "L H C").
+
+## 2026-11-25: skills start lift, loader approach, bench mode removed (built + simulated, NOT run on the robot, not committed)
+- Start: lift goes up to spot 2's height (240, where P1 goes onto goal A), back down to 20, then the shove (`SK_TOGGLE_LIFT_SPOT`).
+- Loader approach: the turn spot stays 1.5" above the line (a back corner would hit the bottom wall mid-turn on the
+  line). The turn now points the nose a little below the line (`spinForLoader`), so the drive in is one gentle right
+  curve onto 270, no S-curve / sudden left turn. Loader camera kept ON (the turn was seen on a plain floor: no cups).
+  `SK_LOADER_WAIT_MS` 500 -> 250 to fit the stack. Sim: meets the loader at 270 every trip; full run (stack on the
+  middle goal) at 59.2 s; slow profile parks at 56.8 s.
+- Bench mode (Y runs the pick) removed: autons/tools run ONLY from field control / a competition switch.
+  `tuneExitWanted()` is always false now (tools end with autonomous).

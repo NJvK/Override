@@ -143,6 +143,10 @@ bool fpTipping = false;
 int fpTipTicks = 0;
 double fpTipRestoreGoal = 0.0;    // height to go back to when it's level again...
 bool fpTipRestoreDown = false;    // ...unless the route has sent the lift down since (it let go and is driving away)
+// Is the lift still climbing? (liftStuck: service() moves the mark up each time it has risen FP_LIFT_RISE_DEG)
+uint32_t fpLiftSentMs = 0;        // when liftTo last sent it
+double fpLiftRiseMark = 0.0;
+uint32_t fpLiftRiseMs = 0;
 }
 
 void liftTo(double height) {
@@ -157,6 +161,8 @@ void liftTo(double height) {
     fpLiftPress = false;
     fpLiftMode = LiftMode::pid;
     fpLiftGoal = height;
+    fpLiftSentMs = fpLiftRiseMs = pros::millis();
+    fpLiftRiseMark = getDR4BPosition();
     DR4B.set_brake_mode_all(pros::E_MOTOR_BRAKE_COAST);
     dr4bSettling = false;
     dr4bTargetForced = false;
@@ -247,6 +253,12 @@ void liftRaiseDirect(double height, int maxMs) {
 bool liftReady() {
     return fpLiftMode == LiftMode::pid && getDR4BPosition() >= fpLiftGoal - FP_LIFT_READY_TOLERANCE;
 }
+bool liftStuck() {
+    if (fpLiftMode != LiftMode::pid || liftReady()) return false;
+    const uint32_t now = pros::millis();
+    return now - fpLiftSentMs >= static_cast<uint32_t>(FP_LIFT_STUCK_MIN_MS) && now - fpLiftRiseMs >= static_cast<uint32_t>(FP_LIFT_STUCK_MS);
+}
+bool liftUpOrStuck() { return liftReady() || liftStuck(); }
 bool liftIsDown() { return getDR4BPosition() <= 5.0; }
 bool liftClimbingPast(double deg) { return fpLiftMode == LiftMode::pid && getDR4BPosition() >= deg; }
 double liftGoal() { return fpLiftGoal; }
@@ -693,6 +705,10 @@ void service() {
     }
 
     // Lift
+    if (fpLiftMode == LiftMode::pid && getDR4BPosition() >= fpLiftRiseMark + FP_LIFT_RISE_DEG) {
+        fpLiftRiseMark = getDR4BPosition();   // still climbing
+        fpLiftRiseMs = now;
+    }
     if (fpLiftPending && !fpTipping && !fpTimeUp && now >= fpLiftPendingAtMs) startHop();
     if (fpLiftMode == LiftMode::hop) {
         if (getDR4BPosition() >= fpHopGoal || now - fpHopStartMs >= static_cast<uint32_t>(PIN_LIFT_TIMEOUT_MS)) endHop();
@@ -1325,9 +1341,10 @@ bool runScore(std::vector<Node> nodes, const PinPlan* pin, const ScorePlan& plan
     MoveOptions options;
     options.gateBeforeEnd = FP_SCORE_GATE_IN + push;
     options.gateHold = fpGateHold;
-    options.gateReady = [&]() { return liftStarted && liftReady() && !fpTipping; };
+    // Up, or as high as it gets (no creeping in at 8 in/s behind a lift that has stopped a little short)
+    options.gateReady = [&]() { return liftStarted && liftUpOrStuck() && !fpTipping; };
     options.gateEta = [&]() {
-        if (!liftStarted) return liftSeconds(plan.height);
+        if (!liftStarted) return liftSeconds(plan.height) + std::max(plan.liftNotBeforeMs - elapsed(), 0) / 1000.0;
         double climb = plan.height - FP_LIFT_READY_TOLERANCE - std::max(getDR4BPosition(), 0.0);
         return std::max(climb, 0.0) / FP_LIFT_UP_DPS;
     };
@@ -1359,9 +1376,10 @@ bool runScore(std::vector<Node> nodes, const PinPlan* pin, const ScorePlan& plan
                 aimGoal();                             // line up on the goal's tag
             }
         }
+        if (pin == nullptr && plan.clawOpenIn > 0.0 && seatAt - done <= plan.clawOpenIn) clawOpen();   // the goal goes into the open claw
         if (grabbed && !liftStarted) {
             const int index = std::min(std::max(static_cast<int>(done / FP_SAMPLE_STEP), 0), n - 1);
-            if (toGate[index] <= liftLead) {
+            if (toGate[index] <= liftLead && elapsed() >= plan.liftNotBeforeMs) {
                 liftStarted = true;
                 liftAfterHop(plan.height);
             }
@@ -1379,11 +1397,28 @@ bool runScore(std::vector<Node> nodes, const PinPlan* pin, const ScorePlan& plan
         liftStarted = true;
     }
     // The move ended before the lift was up (it met the goal early, or the lift is slower than FP_LIFT_UP_DPS): wait
-    // for it, so the pin is let go at its height and not into the side of the stack
-    if (!liftStarted) liftAfterHop(plan.height);
-    for (uint32_t t0 = pros::millis(); !(liftReady() && !fpTipping) && pros::millis() - t0 < static_cast<uint32_t>(FP_GATE_MAX_MS);) {
+    // for it, so the pin is let go at its height and not into the side of the stack. Only while it's still climbing:
+    // once it stops rising it's as high as it gets, and waiting longer changes nothing (it used to wait out the whole
+    // FP_GATE_MAX_MS = 1.5 s at the goal for a lift that had topped out a little short, then let go anyway).
+    if (plan.clawOpenIn > 0.0 && pin == nullptr) clawOpen();
+    if (!liftStarted) {
+        while (elapsed() < plan.liftNotBeforeMs) {   // (it got there first: the lift still may not start yet)
+            if (!waitMs(10)) return false;
+        }
+        liftAfterHop(plan.height);
+    }
+    const uint32_t waitStart = pros::millis();
+    while (!(liftUpOrStuck() && !fpTipping) && pros::millis() - waitStart < static_cast<uint32_t>(FP_GATE_MAX_MS)) {
         if (!waitMs(10)) return false;
     }
+    const int waitedMs = static_cast<int>(pros::millis() - waitStart);
+    if (liftStuck()) {
+        std::printf("%s %5.2f s  lift stopped at %.0f (wanted %.0f): scoring there, waited %d ms\n", fpRouteName, elapsed() / 1000.0,
+                    getDR4BPosition(), plan.height, waitedMs);
+    } else if (waitedMs > 30) {
+        std::printf("%s %5.2f s  at the goal before the lift: waited %d ms for it\n", fpRouteName, elapsed() / 1000.0, waitedMs);
+    }
+    if (!plan.release) return !fpTimeUp;
     return letGo(plan.settleMs, plan.releaseMs, plan.lowerBeforeOpenMs);
 }
 }  // namespace

@@ -7,20 +7,24 @@
 // (include/auton-core.hpp), shared with the 4-pin qual auton.
 //
 // The route:
-//   start    lift up SK_TOGGLE_LIFT_DEG and back down, then a full-power 10" shove forward (the first toggle)
+//   start    lift up to spot SK_TOGGLE_LIFT_SPOT's height (where P1 goes on goal A) and back down, then a full-power 10" shove forward (the first toggle)
 //   1        curve into goal A (the red goal nearest the start) from above, claw open; flip the preload on, hold 1 s
 //   2, 3     straight back with a small swing, curve through the field pin near the middle (P1), round onto goal A
 //   4, 5     straight back, turn, straight through the field pin near the corner (P2), hook round onto goal A
 //   6        matchloader (bottom-left corner) -> goal A, SK_GOAL_A_LOADS times: goal A ends with 5
 //   7        matchloader -> goal B (the other red goal), SK_GOAL_B_LOADS times: goal B ends with 5
 //   end      backs round goal B in one curve onto the BOTTOM wall toggle (lift up SK_TOGGLE2_LIFT_DEG just before the
-//            wall, down to SK_TOGGLE2_DROP_DEG the moment it's on it), then straight forward into the middle zone
+//            wall, down to SK_TOGGLE2_DROP_DEG the moment it's on it), then (SK_MIDDLE_GOAL_FINISH, if the time guard says
+//            it fits) the middle goal: backs into the red cluster pin (intake), flips it onto the middle goal, picks up the
+//            yellow stack above-right of the middle and puts it on the middle goal at spot 4, and stays there. No time:
+//            straight forward into the middle zone as before
 //
 // HOW THE LOADER TRIPS MOVE: straight lines and one turn in place at each end, lift down the whole way.
 //   loader -> goal   straight back out of the loader (SK_LOADER_BACK_OUT), turn to face the goal, straight in. The
 //                    lift stays at the carry height until the goal is close (ScorePlan::liftLate).
-//   goal -> loader   straight back down the same line to the turn spot on the loader line, turn to face the loader,
-//                    straight in (goal B can also turn round and drive there forwards: SK_GOAL_B_REVERSE_TO_LOADER)
+//   goal -> loader   straight back down the same line to the turn spot just above the loader line, turn (nose a
+//                    little below the line), one gentle curve onto the line and in (SK_TURN_ABOVE_LINE)
+//                    (goal B can also turn round and drive there forwards: SK_GOAL_B_REVERSE_TO_LOADER)
 // (They used to be backwards loops that swung the nose round, 270 degrees at the loader, with the lift already up:
 // slow under the lift's speed cap, and a few inches of odometry error bent the loops out of shape.)
 //
@@ -32,8 +36,10 @@
 // (SK_SIM_... below, scaled by how much slower than the simulator its last trip really was). If not, it skips the
 // rest of the loads and goes for the toggle and the park. In the last SK_DASH_TURN_MS + SK_DASH_DRIVE_MS, wherever
 // it is, it points an end at the zone and drives flat out so it's carried in.
-// Simulator (sh sim/run-sim.sh --start -61.85,0,90 --time 60 --size 18): 5 + 5, toggle and parked at 51.3 s. With
-// a slower, slippier drive (--profile sim/slow-robot-profile.txt) the same, parked at 57.1 s.
+// Simulator (sh sim/run-sim.sh --start -61.85,0,90 --time 60 --size 18), 2026-11-25: 5 + 5, toggle at 48.7 s, pin
+// flipped on the middle goal at 55.1 s, the stack on the middle goal at 59.2 s (the full run). The simulator drives
+// every goal push-in in full (no goal to stop it), so the robot should be quicker there. With a slower, slippier drive
+// (--profile sim/slow-robot-profile.txt): toggle at 55.4 s, no time for the middle goal, parked at 56.8 s.
 // =====================================================================
 #include "auton-core.hpp"
 #include "skills.hpp"
@@ -111,6 +117,18 @@ constexpr double SK_TURN_Y = SK_LOADER_Y;
 // bottom wall, and a robot that brakes a little late ends up past the spot: this way that puts it on the line, not
 // 2" below it with a back corner in the wall when it turns. The drive into the loader takes up what's left.
 constexpr double SK_TURN_ABOVE_LINE = 1.5;
+// The turn there can't be on the loader line itself: halfway through it a back corner (11.85" from the center) points
+// straight at the bottom wall, and at the line's -59 it would hit the wall. So it ends 1.5" above the line, and the
+// drive in has to come down 1.5". That used to be: turn to 270 (stopping up to 3 deg short, nose a little ABOVE the
+// line), then an S-curve down onto the line, whose last bend was the sudden left turn into the loader. Now the turn
+// points the nose a little BELOW the line instead (twice the angle from the turn spot to the loader, so the drive in
+// is one even curve, nose coming round to 270 at the loader) and the drive in only ever bends one way: right, gently.
+constexpr double SK_LOADER_SPIN_LEAD_DEG = 2.0;              // the turn is aimed this much past that (it stops up to 3 short)
+constexpr double SK_LOADER_SPIN_MAX_OFF = 20.0;              // never points more than this off 270
+// The claw camera lines the claw up on the loader's cup on the way in (up to 3" sideways, only when it sees exactly one
+// cup near the spot). ON: the left turn the user saw on 2026-11-25 was on a plain floor with no loader or cups, so the
+// camera had nothing to correct on; that turn was the S-curve (fixed above). false = odometry only into the loader.
+constexpr bool SK_LOADER_CAMERA = true;
 // "Stalled against the loader the robot is square to the wall, so its heading IS 270": that was the idea, and
 // odometry's heading used to be set to 270 at the loader every trip. OFF now. Only the claw's tips (7" apart) touch
 // anything there, which doesn't square a robot, and the video run met the loader at an angle: calling that 270 turned
@@ -185,7 +203,66 @@ constexpr double SK_END_T4_Y = -52.0;                                           
 constexpr double SK_TOGGLE2_PUSH_IN = 3.0;         // aims this far into the wall: the wall stops it
 constexpr double SK_TOGGLE2_IN_SPEED = 24.0;       // in/s onto the wall
 constexpr double SK_TOGGLE2_LIFT_AT_IN = 12.0;     // the lift starts up this far before the wall
+// --- After the toggle: the middle goal (instead of just driving into the zone) ---
+// 1. forward off the toggle, turn in place, BACK into the red cluster pin (intake) at full speed, lift down. On the way
+//    in, the robot's right SIDE knocks over the small red pin at (0, -23.55) (the user said that's fine; the side, not
+//    the back, so it can't jam the intake)
+// 2. one forward curve straight from the cluster pin into the middle goal from below, lift staying down until the
+//    intake has fed the pin to the flipper, then up to spot SK_MID_FLIP_SPOT as late as it can, claw opening just
+//    before; flip the intake pin on (like the preload)
+// 3. back off, forward between the middle goal and the small blue pin, pick up the yellow stack on the way through,
+//    round the top of it and into the middle goal from the upper right with the lift at spot SK_MID_STACK_SPOT. It stays
+//    there: no letting go, no backing off (the run is over, and it's parked in the zone).
+// Spots measured off the field drawing. Planned with a 15" chassis (16.5" at the gears). Tightest: ~0.6" between the
+// middle goal and the small blue pin (23.55, 0) going up to the stack. If it clips it on the robot, move SK_MID_EGAP_X.
+constexpr bool SK_MIDDLE_GOAL_FINISH = true;        // false = the old end: toggle, then straight into the zone
+constexpr double SK_MID_TOGGLE_FWD_IN = 10.0;       // straight forward off the toggle first (drags the toggle round)
+constexpr double SK_MID_SPIN1_HEADING = 190.0;      // then turns to this (back toward the cluster pin)...
+constexpr double SK_MID_START_TANGENT = 6.0;
+constexpr double SK_MID_SWEEP_X = 8.0, SK_MID_SWEEP_Y = -30.0, SK_MID_SWEEP_HEADING = 205.0;   // ...backs up through here...
+// ...and swings the nose right into the red cluster pin. The swing sweeps the robot's right SIDE (3-6" ahead of its
+// middle, nowhere near the intake) across the small red pin about 3" before the cluster pin and knocks it over. Planned
+// so it's still the side that hits with the robot 1" or 3 deg off; the back corner passes 3"+ clear of everything else.
+constexpr double SK_MID_PIN_TIP_X = 17.0, SK_MID_PIN_TIP_Y = -23.55;   // tip of the cluster pin that points at the middle
+constexpr double SK_MID_PIN_HEADING = 242.0;        // nose at the pin (its back 28 deg off the pin's line; the 4-pin uses 228)
+constexpr double SK_MID_PIN_EXTRA = 3.0;            // backs this far INTO the pin (the 4-pin uses 4): the intake gets a good bite
+constexpr double SK_MID_PIN_TANGENT = 8.0;
+constexpr double SK_MID_INTAKE_ON_IN = 14.0;        // intake on this far before the pin
+constexpr int SK_MID_PIN_DWELL_MS = 0;              // stopped at the pin while the intake takes it (the 4-pin waits 600; 0 = drives
+                                                    // straight on, intake still running. Raise it if it leaves the pin behind)
+constexpr int SK_MID_INTAKE_KEEP_MS = 8000;         // intake keeps running after the pin until the flip
+constexpr int SK_MID_FEED_MS = 1500;                // the lift stays down this long after the pin (the intake feeds it to the
+                                                    // flipper); after that it still goes up as late as it can before the goal
+constexpr double SK_MID_CURVE_TANGENT = 12.0;       // how long the curve keeps the pin's line before it bends toward the goal
+constexpr double SK_MID_GOAL_X = 0.0, SK_MID_GOAL_Y = 0.0;
+constexpr int SK_MID_GOAL_TAG = -1;                 // any tag near the middle goal
+constexpr double SK_MID_FLIP_HEADING = 336.0;       // into the middle goal for the flip (from below, a little right)
+constexpr int SK_MID_FLIP_SPOT = 3;                 // lift at main.cpp's height for spot 3 (alliance + 2) while it flips
+constexpr double SK_MID_CLAW_OPEN_IN = 8.0;         // claw starts opening this far before the goal (opens in 0.2 s)
+constexpr double SK_MID_PUSH_IN = 3.0;              // on into the goal until it stops the robot (the same as the preload)
+constexpr int SK_MID_FLIP_WAIT_MS = 1000;           // stopped while it flips (the same as the preload's SK_PRELOAD_FLIP_WAIT_MS)
+// Back off the middle goal: dead straight until its center is SK_MID_BACK_CLEAR from the goal's (however far the goal
+// let it push in, it ends up at the same spot: the claw clear of the goal, the small red pin below still clear), then on
+// round a short arc swinging the nose clockwise toward the gap
+constexpr double SK_MID_BACK_CLEAR = 17.0;
+constexpr double SK_MID_BACK_ARC = 8.0;
+constexpr double SK_MID_BACK_SWING = 45.0;          // + = clockwise
+constexpr double SK_MID_EGAP_X = 12.9, SK_MID_EGAP_Y = 0.0, SK_MID_EGAP_HEADING = 10.0;   // between the middle goal and the small blue pin
+constexpr double SK_MID_STACK_X = 23.55, SK_MID_STACK_Y = 23.55;   // yellow stack on the diagonal (upper right of the middle)
+constexpr double SK_MID_STACK_MCL_X = 24.0, SK_MID_STACK_MCL_Y = 24.0;
+constexpr double SK_MID_STACK_HEADING = 35.0;       // through the stack
+constexpr double SK_MID_STACK_LEAD_OUT = 5.0;       // straight on after it before swinging round it
+constexpr double SK_MID_LOOP_TANGENT = 12.0;        // how wide the swing round the stack is
+constexpr double SK_MID_STACK_SCORE_HEADING = 215.0;   // into the middle goal from the upper right
+constexpr int SK_MID_STACK_SPOT = 4;                // lift at main.cpp's height for spot 4
+constexpr double SK_MID_STACK_PUSH_IN = 2.5;
+// Time guard (simulator times, scaled like the loader trips): it only starts a part if it fits before the end
+constexpr int SK_SIM_MID_FLIP_MS = 6500;            // on the toggle -> flipped on the middle goal
+constexpr int SK_SIM_MID_STACK_MS = 4000;           // flipped -> the stack on the middle goal (no spare added: if it
+                                                    // runs out it's at the goal with the stack anyway)
 // Fine tuning per spot (inches, + = further forward)
+constexpr double SK_MID_FLIP_EXTRA = 0.0;
+constexpr double SK_MID_STACK_GRAB_EXTRA = 0.0, SK_MID_STACK_SCORE_EXTRA = 0.0;
 constexpr double SK_PRELOAD_EXTRA = 0.0;
 constexpr double SK_P1_GRAB_EXTRA = 0.0, SK_P1_SCORE_EXTRA = 0.0;
 constexpr double SK_P2_GRAB_EXTRA = 0.0, SK_P2_SCORE_EXTRA = 0.0;
@@ -196,7 +273,10 @@ constexpr double SK_GOAL_B_SCORE_EXTRA = 0.0;
 //   WAITS AND SPEEDS
 // =====================================================================
 constexpr int SK_PRELOAD_FLIP_WAIT_MS = 1000;   // stopped at goal A while the preload flips ("hold for a second")
-constexpr int SK_LOADER_WAIT_MS = 500;          // stopped at the loader, claw spinning, lift pushing down (was 1000: too long)
+constexpr int SK_LOADER_WAIT_MS = 250;          // stopped at the loader, claw spinning, lift pushing down (was 1000, then 500;
+                                                // 250 on 2026-11-25 to fit the stack. The claw starts closing 14" before the
+                                                // loader, so it has been spinning ~0.6 s when the robot backs out. Raise it if
+                                                // the claw leaves matchloads behind)
 constexpr int SK_LOWER_BEFORE_OPEN_MS = 100;    // at a goal: the lift starts down, and this much later the claw opens (the pin is
                                                 // set down, not dropped); the lift keeps coming down as it drives back
 constexpr int SK_RELEASE_MS = 150;              // then this long for the claw to get off the pin before it drives back
@@ -217,10 +297,11 @@ constexpr double SK_APPROACH_IN = 10.0;
 // =====================================================================
 //   LIFT
 // =====================================================================
-constexpr double SK_TOGGLE_LIFT_DEG = 70.0;     // start: lift up this far...
-constexpr int SK_TOGGLE_UP_MAX_MS = 500;
+// start: lift up to main.cpp's height for this spot (2 = the height P1, the first field stack, goes onto goal A at)...
+constexpr int SK_TOGGLE_LIFT_SPOT = 2;
+constexpr int SK_TOGGLE_UP_MAX_MS = 900;
 constexpr double SK_TOGGLE_GO_DEG = 20.0;       // ...and the shove starts once it's back down to this
-constexpr int SK_TOGGLE_DOWN_MAX_MS = 500;
+constexpr int SK_TOGGLE_DOWN_MAX_MS = 900;
 // The second toggle: the lift goes up over it as the robot backs onto the wall, comes down onto it, and driving
 // forward then spins it
 constexpr double SK_TOGGLE2_LIFT_DEG = 50.0;    // up to this just before the wall...
@@ -260,9 +341,9 @@ ScorePlan planFor(double goalX, double goalY, int tagId, int thingsAfter) {
 
 // The time guard: how much slower than the simulator the robot's last loader trip was
 double slowerThanSim = SK_SLOWER_THAN_SIM;
-bool roomFor(int simMs) {
+bool roomFor(int simMs, int spareMs = SK_GUARD_SPARE_MS) {
     if (!SK_USE_TIME_GUARD) return true;
-    return elapsed() + slowerThanSim * simMs + SK_GUARD_SPARE_MS <= SK_AUTON_MS - SK_DASH_TURN_MS - SK_DASH_DRIVE_MS;
+    return elapsed() + slowerThanSim * simMs + spareMs <= SK_AUTON_MS - SK_DASH_TURN_MS - SK_DASH_DRIVE_MS;
 }
 void tripTook(int realMs, int simMs) {
     slowerThanSim = clampTo(static_cast<double>(realMs) / simMs, 1.0, 2.0);
@@ -302,7 +383,7 @@ bool intoLoader() {
     nodes.push_back(grab);
     Curve curve = makeCurve(nodes, false, FP_MAX_SPEED, 0.0);
     addSlowdownAtEnd(curve, SK_LOADER_SLOW_MS, SK_LOADER_IN_SPEED);
-    aimAt(AimKind::pin, SK_LOADER_PIN_X, SK_LOADER_Y);   // the pin sticking out of the loader
+    if (SK_LOADER_CAMERA) aimAt(AimKind::pin, SK_LOADER_PIN_X, SK_LOADER_Y);   // the pin sticking out of the loader
     MoveOptions options;
     options.stallMs = 150;   // against the loader = there
     options.timeoutMs = SK_LOADER_IN_MAX_MS;
@@ -316,7 +397,7 @@ bool intoLoader() {
         return true;
     };
     if (follow(curve, options) == MoveEnd::timeUp) return false;
-    aimStop();
+    if (SK_LOADER_CAMERA) aimStop();
     note("at the loader: claw spinning");
     clawCloseAgain();
     liftDown();
@@ -332,6 +413,16 @@ bool intoLoader() {
     liftPress(false);
     liftTo(SK_LOADER_CARRY_DEG);   // just off the floor: it turns and drives with the lift down
     return true;
+}
+
+// The turn before the drive into the loader (see SK_TURN_ABOVE_LINE): nose a little below the line, so the drive in
+// is one even curve bending right onto the line at 270, never a left turn
+bool spinForLoader() {
+    const Node here = hereNode();
+    const double chord = wrap180(headingFromTo(here.x, here.y, SK_LOADER_GRAB_X, SK_LOADER_Y) - SK_LOADER_HEADING);   // - = below
+    const double off = clampTo(2.0 * chord, -SK_LOADER_SPIN_MAX_OFF, SK_LOADER_SPIN_MAX_OFF);
+    const double turn = wrap180(SK_LOADER_HEADING + off - here.heading);   // which way it turns (it stops short of the end)
+    return spinTo(SK_LOADER_HEADING + off + (turn < 0 ? -SK_LOADER_SPIN_LEAD_DEG : SK_LOADER_SPIN_LEAD_DEG));
 }
 
 // Loader -> a goal: straight back out, turn to face the goal (lift still down), straight in with the lift going up
@@ -370,7 +461,7 @@ bool backDownToLoader() {
     liftDown();
     clawOff();
     if (end == MoveEnd::timeUp) return false;
-    if (!spinTo(SK_LOADER_HEADING)) return false;
+    if (!spinForLoader()) return false;
     return intoLoader();
 }
 
@@ -386,13 +477,13 @@ bool goalBToLoader() {
         MoveOptions options;
         if (follow(curve, options) == MoveEnd::timeUp) return false;
     }
-    if (!spinTo(SK_LOADER_HEADING)) return false;   // square to the loader before it drives in
+    if (!spinForLoader()) return false;
     return intoLoader();
 }
 
-// The end: backs round goal B onto the bottom wall toggle (lift up over it, then down onto it), then straight forward
-// into the middle zone. fromGoalB: it's at goal B (otherwise goal A). false = time up.
-bool toggleAndPark(bool fromGoalB) {
+// The end: backs round goal B onto the bottom wall toggle (lift up over it, then down onto it). fromGoalB: it's at
+// goal B (otherwise goal A). Ends on the wall with the lift down on the toggle. false = time up.
+bool onToToggle(bool fromGoalB) {
     if (!backOffGoal(fromGoalB ? SK_GOAL_B_X : SK_GOAL_A_X, fromGoalB ? SK_GOAL_B_Y : SK_GOAL_A_Y)) return false;
     // Turn so the BACK points the way it's going: at the first spot of the curve
     const double firstX = fromGoalB ? SK_END_T1_X : SK_END_T2_X, firstY = fromGoalB ? SK_END_T1_Y : SK_END_T2_Y;
@@ -430,13 +521,143 @@ bool toggleAndPark(bool fromGoalB) {
     for (uint32_t t0 = pros::millis(); getDR4BPosition() > SK_TOGGLE2_DROP_DEG + 6.0 && pros::millis() - t0 < static_cast<uint32_t>(SK_TOGGLE2_DROP_MAX_MS);) {
         if (!waitMs(10)) return false;
     }
-    // Straight forward into the zone, as fast as it goes (driving forward is what spins the toggle)
+    return true;
+}
+
+// From the toggle: straight forward into the zone, as fast as it goes (driving forward is what spins the toggle)
+bool parkFromToggle() {
     {
         Curve curve = makeCurve({hereNode(), node(SK_PARK_X, SK_PARK_Y, 0.0)}, false, FP_MAX_SPEED, 0.0);
         MoveOptions options;
         if (follow(curve, options) == MoveEnd::timeUp) return false;
     }
     note("parked in the zone");
+    return true;
+}
+
+// Set once the robot heads out for the yellow stack: if time ran out after that, a full-power dash at the zone's middle
+// would be a dash into the middle goal (and its pins). It's in the zone at the goal anyway.
+bool skipEndDash = false;
+
+// From the toggle: the cluster pin onto the middle goal with the flipper, then the yellow stack on top of it with the
+// claw (see SK_MID_* at the top). Ends stopped on the middle goal holding the stack, or (no time for the stack) on the
+// middle goal after the flip. false = time up.
+bool middleGoalFinish() {
+    // ---- 1. Straight forward off the toggle, lift down, turn, then BACK into the cluster pin, intake on ----
+    {
+        Node here = hereNode();
+        Curve curve = makeCurve({here, along(here, SK_MID_TOGGLE_FWD_IN)}, false, FP_MAX_SPEED, 0.0);
+        MoveOptions options;
+        options.tick = [&](double done, double left) {
+            (void)done;
+            if (left <= 2.0) liftDown();   // let go of the toggle at the end of the drag
+            return true;
+        };
+        if (follow(curve, options) == MoveEnd::timeUp) return false;
+    }
+    liftDown();
+    clawOff();
+    flipperDown();   // (already down since the preload) intake position
+    if (!spinTo(SK_MID_SPIN1_HEADING)) return false;
+    const Vec back = forwardOf(SK_MID_PIN_HEADING);   // nose direction; the intake is the other end
+    Node pinPose = node(SK_MID_PIN_TIP_X + back.x * (FP_INTAKE_REACH - SK_MID_PIN_EXTRA),
+                        SK_MID_PIN_TIP_Y + back.y * (FP_INTAKE_REACH - SK_MID_PIN_EXTRA), SK_MID_PIN_HEADING);
+    {
+        Node end = pinPose;
+        end.tangentIn = SK_MID_PIN_TANGENT;
+        // full speed: only the stop at the end slows it. The right side knocks the small red pin over in the swing.
+        Node start = hereNode();
+        start.tangentOut = SK_MID_START_TANGENT;
+        Curve curve = makeCurve({start, node(SK_MID_SWEEP_X, SK_MID_SWEEP_Y, SK_MID_SWEEP_HEADING), end}, true, FP_MAX_SPEED, 0.0);
+        MoveOptions options;
+        options.endStallMs = 80;   // pushed into the cluster = there
+        options.endStallIn = SK_MID_PIN_EXTRA;
+        options.tick = [&](double done, double left) {
+            (void)done;
+            if (left <= SK_MID_INTAKE_ON_IN) {
+                intakeOn();
+                liftPress(true);   // lift pushed down while the intake takes the pin
+            }
+            return true;
+        };
+        if (follow(curve, options) == MoveEnd::timeUp) return false;
+    }
+    note("at the cluster pin (intake)");
+    const int pinAtMs = elapsed();   // the intake needs SK_MID_FEED_MS from here to get the pin up to the flipper
+    intakeOn();
+    if (SK_MID_PIN_DWELL_MS > 0 && !waitMs(SK_MID_PIN_DWELL_MS)) return false;
+    intakeOffAfter(SK_MID_INTAKE_KEEP_MS);   // keeps it in until the flipper takes it
+    liftPress(false);
+
+    // ---- 2. One curve from the cluster pin straight into the middle goal; flip the pin on ----
+    {
+        const Node seat = clawOn(SK_MID_GOAL_X, SK_MID_GOAL_Y, SK_MID_FLIP_HEADING, FP_CLAW_REACH + SK_MID_FLIP_EXTRA);
+        Node here = hereNode();
+        here.tangentOut = SK_MID_CURVE_TANGENT;
+        std::vector<Node> nodes = {here, along(seat, -FP_GOAL_LEAD_IN), seat};
+        ScorePlan plan = planFor(SK_MID_GOAL_X, SK_MID_GOAL_Y, SK_MID_GOAL_TAG, SK_MID_FLIP_SPOT);
+        plan.pushIn = SK_MID_PUSH_IN;
+        plan.clawOpenIn = SK_MID_CLAW_OPEN_IN;
+        plan.release = false;   // the flipper scores this one
+        plan.liftNotBeforeMs = pinAtMs + SK_MID_FEED_MS;   // lift stays down until the intake has fed the pin to the flipper
+        if (!scoreWith(nodes, plan)) return false;
+    }
+    note("at the middle goal: flip");
+    stopChassis(pros::MotorBrake::brake);
+    flipperUp();
+    service();   // (the flipper and the intake get going before the reset below, which takes up to 0.12 s)
+    {
+        const uint32_t arrived = pros::millis();
+        if (FP_RESET_AT_GOALS) fieldAwareReset(FP_RESET_MAX_JUMP);   // standing still: the distance sensors check the position
+        if (!waitMs(std::max(SK_MID_FLIP_WAIT_MS - static_cast<int>(pros::millis() - arrived), 0))) return false;
+    }
+    note("middle goal: pin flipped on");
+
+    // ---- 3. Back off, through the gap past the middle goal, the yellow stack on the way, round it, onto the middle goal ----
+    if (!roomFor(SK_SIM_MID_STACK_MS, 0)) {
+        note("no time for the stack: stays");
+        flipperDown();
+        return true;
+    }
+    skipEndDash = true;
+    {
+        Node here = hereNode();
+        const double straight = std::max(SK_MID_BACK_CLEAR - std::hypot(here.x - SK_MID_GOAL_X, here.y - SK_MID_GOAL_Y), 6.0);
+        Curve curve = makeCurve(backArc(here, straight, SK_MID_BACK_ARC, SK_MID_BACK_SWING), true, FP_MAX_SPEED, FP_CUSP_SPEED);
+        MoveOptions options;
+        options.brakeAtEnd = false;   // rolls straight into the forward curve
+        options.tick = [&](double done, double left) {
+            (void)left;
+            if (done >= FP_LOWER_AFTER_BACK_IN) liftDown();
+            if (done >= straight) flipperDown();
+            if (done >= FP_CLAW_OFF_AFTER_BACK_IN) clawOff();
+            return true;
+        };
+        MoveEnd end = follow(curve, options);
+        liftDown();
+        flipperDown();
+        if (end == MoveEnd::timeUp) return false;
+        note("backed off the middle goal");
+    }
+    {
+        const Node grab = clawOn(SK_MID_STACK_X, SK_MID_STACK_Y, SK_MID_STACK_HEADING, FP_CLAW_REACH + SK_MID_STACK_GRAB_EXTRA);
+        const Node seat = clawOn(SK_MID_GOAL_X, SK_MID_GOAL_Y, SK_MID_STACK_SCORE_HEADING, FP_CLAW_REACH + SK_MID_STACK_SCORE_EXTRA);
+        std::vector<Node> nodes = {
+            hereNode(),
+            node(SK_MID_EGAP_X, SK_MID_EGAP_Y, SK_MID_EGAP_HEADING),
+            node(grab.x, grab.y, grab.heading, 0, 0, FP_GRAB_SPEED),
+            along(grab, SK_MID_STACK_LEAD_OUT, 0, SK_MID_LOOP_TANGENT),
+            along(seat, -FP_GOAL_LEAD_IN, SK_MID_LOOP_TANGENT, 0),
+            seat,
+        };
+        ScorePlan plan = planFor(SK_MID_GOAL_X, SK_MID_GOAL_Y, SK_MID_GOAL_TAG, SK_MID_STACK_SPOT);
+        plan.pushIn = SK_MID_STACK_PUSH_IN;
+        plan.release = false;   // the end of the run: it stays on the goal holding the stack
+        if (!pickUpAndScoreWith(nodes, 2, SK_MID_STACK_X, SK_MID_STACK_Y, SK_MID_STACK_MCL_X, SK_MID_STACK_MCL_Y, SK_PIN_SLOW_MS, plan)) {
+            return false;
+        }
+    }
+    note("stack on the middle goal");
     return true;
 }
 
@@ -450,6 +671,7 @@ void runSkills() {
     setGateHold(false);   // never stops for the lift before a goal: it keeps rolling in while the lift finishes
     setPose(SK_START_X, SK_START_Y, SK_START_HEADING);
     slowerThanSim = SK_SLOWER_THAN_SIM;
+    skipEndDash = false;
 
     const Node preloadPose = clawOn(SK_GOAL_A_X, SK_GOAL_A_Y, SK_PRELOAD_HEADING, FP_CLAW_REACH + SK_PRELOAD_EXTRA);
     const Node p1Pose = clawOn(SK_P1_X, SK_P1_Y, SK_P1_HEADING, FP_CLAW_REACH + SK_P1_GRAB_EXTRA);
@@ -458,7 +680,7 @@ void runSkills() {
     int onGoalA = 0, onGoalB = 0;   // things already on each goal
 
     // ---------------- Start: lift up and down (the first toggle), then a full-power shove off the wall ----------------
-    liftRaiseDirect(SK_TOGGLE_LIFT_DEG, SK_TOGGLE_UP_MAX_MS);
+    liftRaiseDirect(height(SK_TOGGLE_LIFT_SPOT), SK_TOGGLE_UP_MAX_MS);
     note("lift up for the toggles");
     liftDown();
     {
@@ -586,8 +808,16 @@ void runSkills() {
     std::snprintf(counts, sizeof(counts), "A%d B%d, to toggle", onGoalA, onGoalB);
     note(counts);   // stays on the controller if time runs out on the way
 
-    // ---------------- End: the bottom wall toggle, then the middle zone ----------------
-    if (!toggleAndPark(atGoalB)) return;
+    // ---------------- End: the bottom wall toggle, then the middle goal (or just the middle zone) ----------------
+    if (!onToToggle(atGoalB)) return;
+    if (SK_MIDDLE_GOAL_FINISH && roomFor(SK_SIM_MID_FLIP_MS)) {
+        if (!middleGoalFinish()) return;
+        std::snprintf(counts, sizeof(counts), "done A%d B%d middle", onGoalA, onGoalB);
+        note(counts);   // the lift stays up holding the stack on the goal
+        return;
+    }
+    if (SK_MIDDLE_GOAL_FINISH) note("no time for the middle goal: park");
+    if (!parkFromToggle()) return;
     liftCoast();
     std::snprintf(counts, sizeof(counts), "done A%d B%d parked", onGoalA, onGoalB);
     note(counts);
@@ -598,7 +828,8 @@ void runSkills() {
 void skillsAuton() {
     runSkills();
     // Out of time before it was parked: point an end at the zone and drive flat out, so it's carried in
-    const bool dashed = timeUp();
-    endDash(SK_ZONE_X, SK_ZONE_Y, SK_ZONE_RADIUS, SK_DASH_DRIVE_MS);
+    // (Not once it has gone for the yellow stack: the zone's middle is the middle goal, and it's at it already)
+    const bool dashed = timeUp() && !skipEndDash;
+    if (dashed) endDash(SK_ZONE_X, SK_ZONE_Y, SK_ZONE_RADIUS, SK_DASH_DRIVE_MS);
     finishSafe(!dashed);   // after the dash the drive is left coasting
 }

@@ -39,7 +39,7 @@ constexpr float DRIVE_CURVE_GAIN = 1.019;
 //   0 = lift:         "L<lift> H<hold> C<claw rpm>"
 //   2 = counters:      "Pin <pin lifts> Zero <zeroes>" / "Roll <IMU roll>"
 //   3 = distance sensors, inches (-- = sees nothing): "F<front> R<right>" / "B<back> L<left>"
-constexpr int CONTROLLER_READOUT = 3;
+constexpr int CONTROLLER_READOUT = 0;
 
 // DR4B motor
 pros::MotorGroup DR4B({2}, pros::MotorGearset::green);   // one lift motor now
@@ -165,6 +165,23 @@ constexpr int DR4B_LOWER_LIMIT_CONFIRM_CYCLES = 6;
 // --- Manual lift release ---
 // After releasing L1/L2 the lift brakes this long before PID takes over
 constexpr int DR4B_SETTLE_TIME_MS = 250;
+
+// --- Bottom hold-down ---
+// At the bottom (below DR4B_BOTTOM_DEADZONE, target down there too) the rubber bands pull the lift up
+// ~0.5" if the motors are off. Instead it is pressed gently onto the hard stop with a voltage (never a
+// velocity hold, that fought the bands and jiggled). Push = BASE + KP * height, capped at MAX:
+// 0 deg -> 1200 mV, 5 deg -> 2200 mV, 10 deg -> 3200 mV. Same idea as auton's FP_GROUND_HOLD_MV (1200).
+// Still lifts up at the bottom -> raise BASE (try 1800). Motor gets warm sitting at the bottom -> lower BASE.
+constexpr double DR4B_BOTTOM_HOLD_BASE_MV = 1200.0;
+constexpr double DR4B_BOTTOM_HOLD_KP = 200.0;       // extra mV per degree above 0
+constexpr double DR4B_BOTTOM_HOLD_MAX_MV = 4000.0;
+
+// Voltage (negative = down) that holds the lift on its hard stop
+int bottomHoldVoltage(double position) {
+    double push = DR4B_BOTTOM_HOLD_BASE_MV + DR4B_BOTTOM_HOLD_KP * std::max(position, 0.0);
+    if (push > DR4B_BOTTOM_HOLD_MAX_MV) push = DR4B_BOTTOM_HOLD_MAX_MV;
+    return -static_cast<int>(push);
+}
 
 // =====================================================================
 //                      TIP PROTECTION TUNING (all in one place)
@@ -362,13 +379,14 @@ void runDR4BPID() {
         // No correction in bottom deadzone, as long as the target is down there too.
         // (If the target is higher, e.g. an auto lift press, PID must run to get it moving.
         // The same goes for the pin pickup height, which is inside the deadzone on purpose.)
-        if (position >= 0.0 && position <= DR4B_BOTTOM_DEADZONE && dr4bTarget <= DR4B_BOTTOM_DEADZONE && !dr4bTargetForced) {
+        // Instead of switching off, it presses the lift gently onto the hard stop (see DR4B_BOTTOM_HOLD_*).
+        if (position <= DR4B_BOTTOM_DEADZONE && dr4bTarget <= DR4B_BOTTOM_DEADZONE && !dr4bTargetForced) {
             if (brakeHolding) {
                 DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
                 brakeHolding = false;
             }
             settledCycles = 0;
-            DR4B.move_voltage(0);
+            DR4B.move_voltage(bottomHoldVoltage(position));
             previousError = 0.0;
             filteredDerivative = 0.0;
             integral = 0.0;
@@ -635,7 +653,7 @@ void autonomous() {
     runAutonomous();
 }
 
-// Puts the robot back in driver-control shape after an auton: at the start of driver control, and after a bench run
+// Puts the robot back in driver-control shape after an auton (at the start of driver control)
 static void driverSetup() {
     // Lift PID back on, first thing. The qual autons end with the lift PID off and the lift on coast (so a pin that's
     // almost on the goal keeps falling onto it after auton ends); this turns the PID back on and holds the lift
@@ -703,26 +721,6 @@ void opcontrol() {
     bool tipLiftDone = false;
 
     while (true) {
-
-        // Bench mode (nothing connected): Y runs the auton / tool picked with LEFT / RIGHT (src/auton-select.cpp)
-        if (benchRunWanted()) {
-            driverArcadeDrive(0, 0);
-            claw.move_voltage(0);
-            intake.move_voltage(0);
-            flipper.move_voltage(0);
-            autonomous();
-            benchFinished();
-            driverSetup();
-            controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_B);   // B (ends a tool) isn't an intake press
-            clawHolding = false;
-            intakeDirection = 0;
-            flipperReturning = false;
-            pinLiftActive = false;
-            clawSlow = false;
-            clawSpunUp = false;
-            clawStallLatched = false;
-            continue;
-        }
 
         // Drive
         int leftY = deadband(controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y));
@@ -846,7 +844,7 @@ void opcontrol() {
                 zeroPushing = false;
                 zeroStalling = false;
             } else if (!LIFT_ZERO_ON_STALL || liftZeroedThisHold) {
-                DR4B.move_velocity(0);
+                DR4B.move_voltage(bottomHoldVoltage(position));   // was move_velocity(0): fought the bands and jiggled
             } else {
                 // At the bottom with L2 held: keep pushing down gently, and when the lift
                 // stops moving (it is on its hard stop) set the sensor to 0 right there
@@ -872,7 +870,7 @@ void opcontrol() {
                         dr4bRotation.reset_position();
                         liftZeroCount++;
                         liftZeroedThisHold = true;
-                        DR4B.move_velocity(0);
+                        DR4B.move_voltage(bottomHoldVoltage(0.0));
                     }
                 } else {
                     zeroStalling = false;
@@ -903,7 +901,15 @@ void opcontrol() {
         } else {
 
             // Driver released L1/L2 (non-blocking so driving stays responsive)
-            if (dr4bManualMode && !dr4bSettling) {
+            if (dr4bManualMode && !dr4bSettling && getDR4BPosition() <= DR4B_BOTTOM_DEADZONE) {
+                // Let go at the bottom: no brake/settle (the bands would lift it during the settle). Hand it straight
+                // to the PID task with target 0, which presses it onto the hard stop.
+                dr4bTarget = 0.0;
+                dr4bTargetForced = false;
+                DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_COAST);
+                dr4bManualMode = false;
+
+            } else if (dr4bManualMode && !dr4bSettling) {
                 // 1. Actively brake the motors to kill momentum
                 DR4B.set_brake_mode(pros::E_MOTOR_BRAKE_BRAKE);
                 DR4B.move_velocity(0);

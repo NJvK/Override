@@ -4,7 +4,7 @@
 // Picked on the controller like any auton (src/auton-select.cpp). The robot doesn't drive. Everything is on the
 // CONTROLLER screen; the PROS terminal gets one summary line a second. A = auto white balance for the light it's in
 // (PROS has no brightness / exposure setting for this sensor: white balance is the closest thing). It also runs by
-// itself at the start. Bench mode: hold B to stop.
+// itself at the start. Runs until autonomous ends.
 //
 // Both tools see what the AUTOS see: CUPS only (FP_CUP_CLASS_IDS; pins are ignored, the model finds them too badly),
 // with the autos' filters, and "sure" only when there is exactly one cup (boxes within FP_AIM_SAME_IN of each other at

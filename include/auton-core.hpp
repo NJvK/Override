@@ -120,6 +120,12 @@ inline constexpr double FP_SPIN_DONE_DPS = 90.0;       // ...and turning slower 
 //   LIFT
 // =====================================================================
 inline constexpr double FP_LIFT_READY_TOLERANCE = 15.0; // lift counts as up when within this of its height
+// ...or once it has STOPPED CLIMBING short of that (it tops out a little low with a heavy stack / weak bands). It
+// used to wait up to FP_GATE_MAX_MS (1.5 s) at the goal for a lift that was never going to get any higher, then let
+// go anyway: the "stops right before it lowers to score" on the robot. Now it scores the moment the lift stops rising.
+inline constexpr double FP_LIFT_RISE_DEG = 2.0;         // climbing = it rose at least this much...
+inline constexpr int FP_LIFT_STUCK_MS = 120;            // ...in this long. Not climbing for this long = as high as it gets
+inline constexpr int FP_LIFT_STUCK_MIN_MS = 300;        // never decides that sooner than this after it was sent up
 // Pickup hop: when the claw closes on a pin / cup off the field (not the intake), the lift hops up a little, the
 // same as driver control's pin pickup (PIN_LIFT_HEIGHT / PIN_LIFT_MIN_RISE / PIN_LIFT_VOLTAGE in robot.hpp).
 // No stall check: the route already knows when the claw closes, so it just waits this long for the claw to shut.
@@ -375,6 +381,8 @@ void liftPress(bool on);              // while down: push with FP_PICKUP_PRESS_M
 void liftCoast();                     // PID off and the motor limp
 void liftRaiseDirect(double height, int maxMs);   // full power up until it reads height (or maxMs): the start toggles
 bool liftReady();                     // at the height it was sent to (pid mode)
+bool liftStuck();                     // sent up (pid mode), short of its height, and no longer climbing
+bool liftUpOrStuck();                 // liftReady() or liftStuck(): as high as it's going to get
 bool liftIsDown();
 bool liftClimbingPast(double deg);    // pid mode and already above deg
 bool tipping();
@@ -511,6 +519,15 @@ struct ScorePlan {
     // The curve carries on this many inches past the spot where the claw should be on the goal, and the move ends as
     // soon as the goal stops the robot. Covers odometry reading a few inches long ("didn't drive far enough in").
     double pushIn = 0;
+    // > 0: the claw starts opening this many inches before the goal (no pickup on the way: the goal goes into the open
+    // claw, e.g. so the flipper can put the intake's pin on it)
+    double clawOpenIn = 0;
+    // false = it doesn't let go: the move ends stopped on the goal with the lift at its height and the claw as it is
+    // (the route does what comes next: flips, or just stays there at the end of the run)
+    bool release = true;
+    // The lift never starts up before this time (elapsed() ms; 0 = no limit), e.g. so the intake can finish passing a
+    // pin to the flipper. If that makes it late, the robot keeps rolling in slowly while the lift catches up.
+    int liftNotBeforeMs = 0;
 };
 // Stopped at a goal: lets go as described above, with a distance-sensor reset while it stands there (FP_RESET_AT_GOALS).
 // The scoring functions call it themselves; a route that drives into a goal its own way calls it too. false = time up.
